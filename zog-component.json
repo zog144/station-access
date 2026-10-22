@@ -1,0 +1,28 @@
+{
+  "schema": 2,
+  "program": "station-access",
+  "python_package": "zog.station_access",
+  "version": "0.4.29",
+  "scripts": {
+    "station-access": "zog.station_access.cli:main"
+  },
+  "component_dependencies": [
+    "archive-mirror",
+    "box-control",
+    "host-deploy",
+    "host-identify",
+    "network-register"
+  ],
+  "external_dependencies": [
+    "Django>=5.2,<5.3",
+    "waitress>=3,<4",
+    "boto3>=1.34,<2"
+  ],
+  "package_data": [
+    "host_registry/fixtures/*.json"
+  ],
+  "license_notice_paths": [
+    "COPYRIGHT",
+    "THIRD-PARTY-NOTICES.md"
+  ]
+}

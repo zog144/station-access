@@ -1,0 +1,825 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zog-project.org/schemas/workspace-agent-v1.schema.json",
+  "title": "Zog Workspace API v1 HTTP response contracts",
+  "description": "Read-only scoped Workspace observations. Each successful route selects one response definition; structured errors use $defs/error.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/capabilities"
+    },
+    {
+      "$ref": "#/$defs/workspaces"
+    },
+    {
+      "$ref": "#/$defs/workspace_detail"
+    },
+    {
+      "$ref": "#/$defs/applications"
+    },
+    {
+      "$ref": "#/$defs/runtime_detail"
+    },
+    {
+      "$ref": "#/$defs/logs"
+    },
+    {
+      "$ref": "#/$defs/error"
+    }
+  ],
+  "x-zog-endpoints": {
+    "GET /api/agent/v1/capabilities/": "#/$defs/capabilities",
+    "GET /api/agent/v1/workspaces/": "#/$defs/workspaces",
+    "GET /api/agent/v1/workspaces/{uuid}/": "#/$defs/workspace_detail",
+    "GET /api/agent/v1/workspaces/{uuid}/applications/": "#/$defs/applications",
+    "GET /api/agent/v1/workspaces/{uuid}/runtimes/{runtime_id}/": "#/$defs/runtime_detail",
+    "GET /api/agent/v1/workspaces/{uuid}/runtimes/{runtime_id}/logs/": "#/$defs/logs"
+  },
+  "$defs": {
+    "observed": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "observed",
+            "partial",
+            "absent",
+            "previous-boot",
+            "identity-unavailable",
+            "changed-during-read",
+            "integrity-fault",
+            "unavailable",
+            "not-requested",
+            "not-probed",
+            "running",
+            "stopped",
+            "active",
+            "failed"
+          ]
+        },
+        "basis": {
+          "type": "string",
+          "enum": [
+            "controller-systemd-snapshot",
+            "not-probed"
+          ]
+        },
+        "observed_at": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "basis",
+        "observed_at"
+      ],
+      "additionalProperties": false
+    },
+    "workspace": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "name": {
+          "type": "string"
+        },
+        "number": {
+          "type": "integer"
+        },
+        "desired": {
+          "type": "object",
+          "properties": {
+            "running": {
+              "type": "boolean"
+            },
+            "basis": {
+              "const": "station-access-persisted"
+            }
+          },
+          "required": [
+            "running",
+            "basis"
+          ],
+          "additionalProperties": false
+        },
+        "expected_launched": {
+          "type": "object",
+          "properties": {
+            "runtime_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "instance_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "launch_pending": {
+              "type": "boolean"
+            },
+            "basis": {
+              "const": "station-access-persisted"
+            }
+          },
+          "required": [
+            "runtime_id",
+            "instance_id",
+            "launch_pending",
+            "basis"
+          ],
+          "additionalProperties": false
+        },
+        "recorded_updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "observed": {
+          "$ref": "#/$defs/observed"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "number",
+        "desired",
+        "expected_launched",
+        "recorded_updated_at",
+        "observed"
+      ],
+      "additionalProperties": false
+    },
+    "pagination": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "has_more": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "limit",
+        "next_cursor",
+        "has_more"
+      ],
+      "additionalProperties": false
+    },
+    "error_obj": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "authentication_required",
+            "insufficient_scope",
+            "not_found",
+            "invalid_pagination",
+            "invalid_log_query",
+            "log_cursor_expired",
+            "inspection_busy",
+            "observation_unavailable",
+            "logs_unavailable",
+            "method_not_allowed"
+          ]
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "code",
+        "retryable"
+      ],
+      "additionalProperties": false
+    },
+    "capabilities": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "zog-workspace-api-v1"
+        },
+        "principal": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "user",
+                "service"
+              ]
+            },
+            "grant_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "kind",
+            "grant_id"
+          ],
+          "additionalProperties": false
+        },
+        "capabilities": {
+          "type": "object",
+          "properties": {
+            "workspace_inspection": {
+              "type": "boolean"
+            },
+            "application_inspection": {
+              "type": "boolean"
+            },
+            "runtime_inspection": {
+              "type": "boolean"
+            },
+            "logs": {
+              "type": "boolean"
+            },
+            "launch": {
+              "const": false
+            },
+            "stop": {
+              "const": false
+            },
+            "desktop_input": {
+              "const": false
+            },
+            "screenshots": {
+              "const": false
+            },
+            "live_mount_observation": {
+              "const": false
+            }
+          },
+          "required": [
+            "workspace_inspection",
+            "application_inspection",
+            "runtime_inspection",
+            "logs",
+            "launch",
+            "stop",
+            "desktop_input",
+            "screenshots",
+            "live_mount_observation"
+          ],
+          "additionalProperties": false
+        },
+        "pagination": {
+          "type": "object",
+          "properties": {
+            "max_limit": {
+              "const": 50
+            },
+            "cursor": {
+              "const": "decimal-offset"
+            }
+          },
+          "required": [
+            "max_limit",
+            "cursor"
+          ],
+          "additionalProperties": false
+        },
+        "evidence": {
+          "type": "object",
+          "properties": {
+            "controller_observation": {
+              "const": "read-only"
+            },
+            "kernel_mounts": {
+              "const": "unsupported"
+            }
+          },
+          "required": [
+            "controller_observation",
+            "kernel_mounts"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "schema",
+        "principal",
+        "capabilities",
+        "pagination",
+        "evidence"
+      ],
+      "additionalProperties": false
+    },
+    "workspaces": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "zog-workspace-api-v1"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/workspace"
+          }
+        },
+        "pagination": {
+          "$ref": "#/$defs/pagination"
+        },
+        "state_source": {
+          "const": "persisted-and-advisory-observation"
+        }
+      },
+      "required": [
+        "schema",
+        "items",
+        "pagination",
+        "state_source"
+      ],
+      "additionalProperties": false
+    },
+    "workspace_detail": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "zog-workspace-api-v1"
+        },
+        "workspace": {
+          "$ref": "#/$defs/workspace"
+        }
+      },
+      "required": [
+        "schema",
+        "workspace"
+      ],
+      "additionalProperties": false
+    },
+    "application": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "multi_instance": {
+          "type": "boolean"
+        },
+        "start_policy": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workspace_role": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_license": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "reason"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "multi_instance",
+        "start_policy",
+        "workspace_role",
+        "source_license"
+      ],
+      "additionalProperties": false
+    },
+    "member_runtime": {
+      "type": "object",
+      "properties": {
+        "runtime_id": {
+          "type": "string"
+        },
+        "application_name": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "basis": {
+          "const": "expected-launched"
+        }
+      },
+      "required": [
+        "runtime_id",
+        "application_name",
+        "state",
+        "basis"
+      ],
+      "additionalProperties": false
+    },
+    "applications": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "zog-workspace-api-v1"
+        },
+        "workspace_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "membership": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "recorded-controller",
+                "unavailable"
+              ]
+            },
+            "basis": {
+              "type": "string",
+              "enum": [
+                "controller-workspace-v1",
+                "not-probed"
+              ]
+            }
+          },
+          "required": [
+            "status",
+            "basis"
+          ],
+          "additionalProperties": false
+        },
+        "catalogue_scope": {
+          "type": "string",
+          "enum": [
+            "workspace-bound-only",
+            "user-authorized"
+          ]
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/application"
+          }
+        },
+        "pagination": {
+          "$ref": "#/$defs/pagination"
+        },
+        "runtimes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/member_runtime"
+          }
+        },
+        "runtimes_truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "schema",
+        "workspace_id",
+        "membership",
+        "catalogue_scope",
+        "items",
+        "pagination",
+        "runtimes",
+        "runtimes_truncated"
+      ],
+      "additionalProperties": false
+    },
+    "software": {
+      "type": "object",
+      "properties": {
+        "basis": {
+          "const": "expected-launched"
+        },
+        "view": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "binding_digest": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "manifest_digest": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mount_observation": {
+          "const": "not-probed"
+        }
+      },
+      "required": [
+        "basis",
+        "view",
+        "artifacts",
+        "binding_digest",
+        "manifest_digest",
+        "mount_observation"
+      ],
+      "additionalProperties": false
+    },
+    "runtime": {
+      "type": "object",
+      "properties": {
+        "runtime_id": {
+          "type": "string"
+        },
+        "application_name": {
+          "type": "string"
+        },
+        "instance_id": {
+          "type": "string"
+        },
+        "expected_launched": {
+          "type": "object",
+          "properties": {
+            "basis": {
+              "const": "controller-persisted-runtime"
+            },
+            "state": {
+              "type": "string"
+            },
+            "generation": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "software": {
+              "$ref": "#/$defs/software"
+            },
+            "created_at": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "completed_at": {
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "basis",
+            "state",
+            "generation",
+            "software",
+            "created_at",
+            "completed_at"
+          ],
+          "additionalProperties": false
+        },
+        "observed": {
+          "$ref": "#/$defs/observed"
+        },
+        "integrity": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "const": "unavailable"
+            },
+            "basis": {
+              "const": "not-probed"
+            }
+          },
+          "required": [
+            "status",
+            "basis"
+          ],
+          "additionalProperties": false
+        },
+        "programs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string"
+              },
+              "result": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "invocation_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "name",
+              "state",
+              "result",
+              "invocation_id"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "runtime_id",
+        "application_name",
+        "instance_id",
+        "expected_launched",
+        "observed",
+        "integrity",
+        "programs"
+      ],
+      "additionalProperties": false
+    },
+    "runtime_detail": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "zog-workspace-api-v1"
+        },
+        "workspace_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "runtime": {
+          "$ref": "#/$defs/runtime"
+        }
+      },
+      "required": [
+        "schema",
+        "workspace_id",
+        "runtime"
+      ],
+      "additionalProperties": false
+    },
+    "log_entry": {
+      "type": "object",
+      "properties": {
+        "cursor": {
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "string"
+        },
+        "program": {
+          "type": "string"
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 7
+        },
+        "message": {
+          "type": "string"
+        },
+        "invocation_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "cursor",
+        "timestamp",
+        "program",
+        "priority",
+        "message",
+        "invocation_id"
+      ],
+      "additionalProperties": false
+    },
+    "log_page": {
+      "type": "object",
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/log_entry"
+          }
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "has_more": {
+          "type": "boolean"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "journald",
+            "fixture"
+          ]
+        },
+        "status": {
+          "type": "string"
+        },
+        "basis": {
+          "type": "string",
+          "enum": [
+            "journald-invocation",
+            "test-fixture"
+          ]
+        }
+      },
+      "required": [
+        "entries",
+        "next_cursor",
+        "has_more",
+        "source",
+        "status",
+        "basis"
+      ],
+      "additionalProperties": false
+    },
+    "logs": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "zog-workspace-api-v1"
+        },
+        "workspace_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "runtime_id": {
+          "type": "string"
+        },
+        "logs": {
+          "$ref": "#/$defs/log_page"
+        }
+      },
+      "required": [
+        "schema",
+        "workspace_id",
+        "runtime_id",
+        "logs"
+      ],
+      "additionalProperties": false
+    },
+    "error": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "zog-workspace-api-v1"
+        },
+        "error": {
+          "$ref": "#/$defs/error_obj"
+        }
+      },
+      "required": [
+        "schema",
+        "error"
+      ],
+      "additionalProperties": false
+    }
+  }
+}
