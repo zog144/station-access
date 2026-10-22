@@ -1,0 +1,386 @@
+# Read-only public-source acceptance. Does not authorize production execution.
+name: Public Source Acceptance
+
+on:
+  push:
+    branches: [unstable, main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python-namespace-wheel:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, node24
+        with:
+          persist-credentials: false
+
+      - name: Reject excluded historical/publication artifacts
+        run: python tools/check-public-source.py
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6, node24
+        with:
+          python-version: "3.12"
+
+      - name: Check namespace and repository layout
+        run: python tools/check-python-namespace.py
+
+      - name: Compile source and source-only tests
+        run: python -m compileall -q src tests
+
+      - name: Test layout-sensitive source tooling
+        run: |
+          python -m pip install "Django>=5.2,<5.3" "waitress>=3,<4"
+          python -m unittest discover -s tools/tests -v
+
+      - name: Build component wheel
+        run: |
+          python -m pip install --upgrade pip build setuptools wheel
+          python -m build --wheel --no-isolation .
+
+      - name: Inspect wheel contents and entry point
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import configparser
+          import zipfile
+
+          wheel = next(Path("dist").glob("*.whl"))
+          with zipfile.ZipFile(wheel) as archive:
+              names = set(archive.namelist())
+              assert "zog/__init__.py" not in names
+              assert "zog/station_access/__init__.py" in names
+              assert "zog/station_access/cli.py" in names
+              assert "zog/station_access/host_registry/fixtures/managed-state.json" in names
+              assert "zog/station_access/host_registry/migrations/0001_initial.py" in names
+              assert "zog/station_access/archive_inventory/migrations/0001_initial.py" in names
+              assert "zog/station_access/migrations/0001_initial.py" in names
+              assert not any("/tests/" in name or name.rsplit("/", 1)[-1].startswith("test_") for name in names)
+
+              entry_name = next(name for name in names if name.endswith(".dist-info/entry_points.txt"))
+              parser = configparser.ConfigParser()
+              parser.read_string(archive.read(entry_name).decode())
+              assert parser["console_scripts"]["station-access"] == "zog.station_access.cli:main"
+          PY
+
+      - name: Verify clean installed import and console entry point
+        run: |
+          python -m venv "$RUNNER_TEMP/station-access-install"
+          "$RUNNER_TEMP/station-access-install/bin/python" -m pip install --no-deps dist/*.whl
+          temp="$(mktemp -d)"
+          cd "$temp"
+          env -u PYTHONPATH "$RUNNER_TEMP/station-access-install/bin/python" - <<'PY'
+          import zog.station_access
+          from zog.station_access.cli import main
+          assert zog.station_access.__version__ == "0.4.29"
+          assert callable(main)
+          PY
+          env -u PYTHONPATH "$RUNNER_TEMP/station-access-install/bin/station-access" --help >/dev/null
+
+  django-integration:
+    # Secrets are never exposed to pull requests from forks.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      STATION_ACCESS_FRONTEND_DIRECTORY: ${{ github.workspace }}/frontend/dist
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, node24
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6, node24
+        with:
+          python-version: "3.12"
+
+      - name: Require explicitly accepted immutable public companion pins
+        id: pins
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          handoff = json.loads(Path("public-companion-pins.json").read_text())
+          if (handoff.get("schema") != "zog-station-public-companion-pins-v1" or
+                  handoff.get("status") != "accepted"):
+              raise SystemExit("Public companion pins lack explicit source and compatibility acceptance")
+          expected = {"zog144/host-identify":"host_identify","zog144/host-discover":"host_discover","zog144/host-install":"host_install","zog144/image-build":"image_build","zog144/box-control":"box_control","zog144/root-control":"root_control","zog144/archive-mirror":"archive_mirror","zog144/network-register":"network_register","zog144/host-deploy":"host_deploy","zog144/certify-manage":"certify_manage"}
+          dependencies = handoff["dependencies"]
+          if len(dependencies) != len(expected):
+              raise SystemExit("Companion entries must be unique and complete")
+          pinned = {item["repository"]: item["commit"] for item in dependencies}
+          if set(pinned) != set(expected):
+              raise SystemExit("Companion repositories differ from approved scope")
+          for item in dependencies:
+              if (item.get("rights_acceptance") != "accepted"
+                  or item.get("consumer_acceptance") != "accepted"
+                  or not re.fullmatch(r"[0-9a-f]{64}",
+                                     item.get("acceptance_evidence_sha256") or "")):
+                  raise SystemExit("Missing per-companion rights/consumer evidence for " + item["repository"])
+          if set(pinned) != set(expected):
+              raise SystemExit(f"Companion repository set differs: {sorted(set(pinned) ^ set(expected))}")
+          if not all(re.fullmatch(r"[0-9a-f]{40}", sha) for sha in pinned.values()):
+              raise SystemExit("Every companion pin must be a full immutable Git commit")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as outputs:
+              for repository, label in expected.items():
+                  print(f"{label}={pinned[repository]}", file=outputs)
+          PY
+
+
+      - name: Check out zog144/host-identify
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, node24
+        with:
+          repository: zog144/host-identify
+          ref: ${{ steps.pins.outputs.host_identify }}
+          path: dependencies/zog144/host-identify
+          persist-credentials: false
+
+      - name: Check out zog144/host-discover
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, node24
+        with:
+          repository: zog144/host-discover
+          ref: ${{ steps.pins.outputs.host_discover }}
+          path: dependencies/zog144/host-discover
+          persist-credentials: false
+
+      - name: Check out zog144/host-install
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, node24
+        with:
+          repository: zog144/host-install
+          ref: ${{ steps.pins.outputs.host_install }}
+          path: dependencies/zog144/host-install
+          persist-credentials: false
+
+      - name: Check out zog144/image-build
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, node24
+        with:
+          repository: zog144/image-build
+          ref: ${{ steps.pins.outputs.image_build }}
+          path: dependencies/zog144/image-build
+          persist-credentials: false
+
+      - name: Check out zog144/box-control
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, node24
+        with:
+          repository: zog144/box-control
+          ref: ${{ steps.pins.outputs.box_control }}
+          path: dependencies/zog144/box-control
+          persist-credentials: false
+
+      - name: Check out zog144/root-control
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, node24
+        with:
+          repository: zog144/root-control
+          ref: ${{ steps.pins.outputs.root_control }}
+          path: dependencies/zog144/root-control
+          persist-credentials: false
+
+      - name: Check out zog144/archive-mirror
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, node24
+        with:
+          repository: zog144/archive-mirror
+          ref: ${{ steps.pins.outputs.archive_mirror }}
+          path: dependencies/zog144/archive-mirror
+          persist-credentials: false
+
+      - name: Check out zog144/network-register
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, node24
+        with:
+          repository: zog144/network-register
+          ref: ${{ steps.pins.outputs.network_register }}
+          path: dependencies/zog144/network-register
+          persist-credentials: false
+
+      - name: Check out zog144/certify-manage
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, node24
+        with:
+          repository: zog144/certify-manage
+          ref: ${{ steps.pins.outputs.certify_manage }}
+          path: dependencies/zog144/certify-manage
+          persist-credentials: false
+
+      - name: Check out zog144/host-deploy
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, node24
+        with:
+          repository: zog144/host-deploy
+          ref: ${{ steps.pins.outputs.host_deploy }}
+          path: dependencies/zog144/host-deploy
+          persist-credentials: false
+
+      - name: Verify checked-out companion identities
+        run: |
+          python - <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+          handoff = json.loads(Path("public-companion-pins.json").read_text())
+          for item in handoff["dependencies"]:
+              name = item["repository"]
+              path = Path("dependencies") / name
+              observed = subprocess.check_output(["git", "-C", str(path), "rev-parse", "HEAD"], text=True).strip()
+              if observed != item["commit"]:
+                  raise SystemExit(f"Mismatch in {name}: expected {item['commit']}, observed {observed}")
+              print(f"{name}: {observed}")
+          PY
+
+      - name: Install pinned third-party and Zog components
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -r requirements-security-tested.txt
+          python -m pip install "dbus-next==0.2.3" "dnspython>=2.8,<3"
+          python -m pip install --no-deps -e dependencies/zog144/host-identify
+          python -m pip install --no-deps -e dependencies/zog144/host-discover
+          python -m pip install --no-deps -e dependencies/zog144/host-install
+          python -m pip install --no-deps -e dependencies/zog144/image-build
+          python -m pip install --no-deps -e dependencies/zog144/box-control/box-control
+          python -m pip install --no-deps -e dependencies/zog144/root-control
+          python -m pip install --no-deps -e dependencies/zog144/archive-mirror
+          python -m pip install --no-deps -e dependencies/zog144/network-register
+          python -m pip install --no-deps -e dependencies/zog144/certify-manage
+          python -m pip install --no-deps -e dependencies/zog144/host-deploy
+          python -m pip install --no-deps -e .
+          python -m pip check
+
+      - name: Verify actual imported Zog components
+        run: |
+          python - <<'PY'
+          import importlib
+          from pathlib import Path
+
+          root = (Path.cwd() / "dependencies" / "zog144").resolve()
+          for component in ["host_identify","host_discover","host_install","image_build","box_control","root_control","archive_mirror","network_register","host_deploy","certify_manage"]:
+              module = importlib.import_module("zog." + component)
+              location = Path(module.__file__).resolve()
+              if not location.is_relative_to(root):
+                  raise SystemExit(f"Unexpected module location {component}: {location}")
+              print(f"zog.{component}: {location}")
+          PY
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5, node24
+        with:
+          node-version: "24.19.0"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend assets for Django response tests
+        run: |
+          npm install --global npm@11.9.0
+          npm ci --prefix frontend
+          npm run build --prefix frontend
+
+      - name: Install pinned Workspace API contract test validator
+        run: python -m pip install "jsonschema==4.25.1"
+
+      - name: Verify production station module subprocess entry
+        run: python -m unittest tests.station_access.test_production_module_launch -v
+
+      - name: Verify exact archive ownership and two-store migration contract
+        # The archive checkout is exact-pinned; required cross-repo tests fail
+        # if it is absent rather than silently skipping composition.
+        run: python -m unittest tests.station_access.test_production_composition tests.station_access.test_state_migration -v
+
+      - name: Verify certificate proposal and fail-closed owner boundary
+        run: python tools/test-backend.py tests.host_registry.test_certificate_setup tests.host_registry.test_certificate_assignment
+
+      - name: Validate issuer-only Cloudflare reader and replay fencing
+        run: python tools/test-backend.py tests.host_registry.test_issuer_cloudflare_reader
+
+      - name: Validate read-only console progress and local-seat boundary
+        run: python tools/test-backend.py tests.host_registry.test_application_progress
+
+      - name: Run complete Django backend test suite
+        run: python tools/test-backend.py
+
+
+      - name: Run optional archive provider and signed receiver integration
+        # The optional app must be installed before Django URLConf/AppRegistry load.
+        env:
+          ARCHIVE_MIRROR_CONFIGURATION: "isolated-ci-provider-fixture"
+        run: |
+          python tools/test-backend.py \
+            tests.archive_inventory.test_integration.ProviderIntegrationTests
+
+      - name: Verify Django model migrations have no drift
+        env:
+          STATION_ACCESS_STATE_DIRECTORY: ${{ runner.temp }}/station-access-migration-state
+          DJANGO_SETTINGS_MODULE: zog.station_access.project.settings
+        run: |
+          mkdir -p "$STATION_ACCESS_STATE_DIRECTORY"
+          python manage.py makemigrations --check --dry-run
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, node24
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5, node24
+        with:
+          node-version: "24.19.0"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install pinned npm
+        run: npm install --global npm@11.9.0
+
+      - name: Verify npm version
+        run: |
+          npm --version
+          test "$(npm --version)" = "11.9.0"
+
+      - name: Check first-party grant and npm lock consistency
+        run: |
+          node --input-type=module - <<'JS'
+          import fs from 'node:fs'
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
+          const lock = JSON.parse(fs.readFileSync('package-lock.json', 'utf8'))
+          const expected = 'BSD-3-Clause OR GPL-3.0-only'
+          if (pkg.license !== expected || lock.packages[''].license !== expected || pkg.private !== true)
+            throw Error('First-party npm source license and locked metadata are inconsistent')
+          if (!fs.readFileSync('../LICENSE','utf8').includes(expected))
+            throw Error('Approved public-export LICENSE declaration missing')
+          for (const name of ['BSD-3-Clause', 'GPL-3.0-only']) {
+            if (!fs.readFileSync('../LICENSES/'+name+'.txt','utf8').trim())
+              throw Error('Required complete public license text missing: '+name)
+          }
+          JS
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run frontend tests
+        run: npm test
+
+      - name: Verify frontend license evidence
+        run: npm run test:licenses
+
+      - name: Build production frontend
+        run: npm run build
+
+      - name: Verify emitted bundled first-party grant and upstream notice
+        run: |
+          node --input-type=module - <<'JS'
+          import fs from 'node:fs'
+          import path from 'node:path'
+          const out = JSON.parse(fs.readFileSync('dist/frontend-build.json', 'utf8'))
+          if (out.mode !== 'production' || out.node_env !== 'production' ||
+              !out.licenses.startsWith('assets/LICENSES-') ||
+              !out.licenses.endsWith('.txt')) throw Error('Missing production notice inventory')
+          const legal = fs.readFileSync(path.join('dist',out.licenses), 'utf8')
+          for (const term of ['BSD-3-Clause OR GPL-3.0-only','react','vite']) {
+            if (!legal.includes(term)) throw Error('Bundle notice missing expected declaration: '+term)
+          }
+          if (!fs.readFileSync('dist/index.html','utf8').includes('rel="license"'))
+            throw Error('Frontend lacks license attribution link')
+          JS

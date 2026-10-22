@@ -1,0 +1,7 @@
+{
+  "schema": "zog-workspace-api-v1",
+  "error": {
+    "code": "insufficient_scope",
+    "retryable": false
+  }
+}

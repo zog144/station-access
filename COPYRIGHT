@@ -1,0 +1,14 @@
+Copyright (c) 2026 Alex Black.
+
+Original station-access first-party source code, documentation, tests,
+application declarations and original artwork for which Alex Black holds
+copyright are licensed at your option under BSD-3-Clause OR GPL-3.0-only.
+The complete license texts are in LICENSES/BSD-3-Clause.txt and
+LICENSES/GPL-3.0-only.txt. This new public-export grant supersedes the
+private-only declaration solely for the source newly published under it;
+private historical snapshots retain their historical notices and records.
+
+Third-party components, published npm packages, licenses, fonts, code,
+upstream archives, independently authored artwork, credentials and operational
+host evidence are not relicensed by this declaration. They remain subject
+to their own copyright, permissions and release acceptance obligations.

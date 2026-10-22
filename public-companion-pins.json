@@ -1,0 +1,109 @@
+{
+  "schema": "zog-station-public-companion-pins-v1",
+  "status": "accepted",
+  "reviewed_at": "2026-10-22",
+  "source_revision": "9240df65c3e2b585601857ae3398a3877a12eb12",
+  "review_note": "SOURCE-ONLY acceptance, not native execution: all ten exact source consumer receipts from station-access-release-acceptance-03fa6b24(1).zip were byte-hash verified; original full backend had AF_UNIX root-container limitations subsequently resolved on exact selected 03fa6b24 source by independent nonroot 533 PASS/2 separately passed skipped cases, recorded in private know-file October 22 publication review (ZIP sha256 68331599373d78f065151e6f45264ee86ca3250ba413dd0a94c6b2276eb2a4d8). Rights scope: original first-party Zog source grants and independently reviewed notices only, under user ownership certification for 3c71 tree plus approved public-safe README and pin-only delta; third-party built files/rootfs, Certbot, provider credentials, systemd/root grants/SSM/nginx explicitly excluded. Manifest edit requires new tree/readback; separate public publication authorization pending.",
+  "dependencies": [
+    {
+      "repository": "zog144/host-identify",
+      "commit": "1a5eac0b255c995022db6a3a4c0051efffa748cc",
+      "package_path": "pyproject.toml",
+      "public_source_observed": true,
+      "first_party_license_observed": true,
+      "consumer_acceptance": "accepted",
+      "rights_acceptance": "accepted",
+      "acceptance_evidence_sha256": "124ec46b5d2559f6e64d9310b4a99d8939fad6f76905893b0a5348b160457ba9"
+    },
+    {
+      "repository": "zog144/host-discover",
+      "commit": "0f2c6fd5cb33528ed2fe9fd1c855d2f691db6f80",
+      "package_path": "pyproject.toml",
+      "public_source_observed": true,
+      "first_party_license_observed": true,
+      "consumer_acceptance": "accepted",
+      "rights_acceptance": "accepted",
+      "acceptance_evidence_sha256": "1b2f4d2ad914c2e9a608a665add26c066fd940b1d181983b98bee266f9025422"
+    },
+    {
+      "repository": "zog144/host-install",
+      "commit": "e6e474c63749a614fcf934d547d70b2bd12d7ce0",
+      "package_path": "pyproject.toml",
+      "public_source_observed": true,
+      "first_party_license_observed": true,
+      "consumer_acceptance": "accepted",
+      "rights_acceptance": "accepted",
+      "acceptance_evidence_sha256": "f17a36383895f62126baa84474dc3c1357fa3efe0841b19e5118f9c577fb6e5f"
+    },
+    {
+      "repository": "zog144/image-build",
+      "commit": "5ec60e967b4d3005a0db13666ea5e3dbd2d4255f",
+      "package_path": "pyproject.toml",
+      "public_source_observed": true,
+      "first_party_license_observed": true,
+      "consumer_acceptance": "accepted",
+      "rights_acceptance": "accepted",
+      "acceptance_evidence_sha256": "75a8800296f50f40daf9cd8563feb5cd889e7fc0e8cdd826f530f39012a6468e"
+    },
+    {
+      "repository": "zog144/box-control",
+      "commit": "cc96f7e220c6bf744bc8625ede9fedfe3cad6a58",
+      "package_path": "box-control/pyproject.toml",
+      "public_source_observed": true,
+      "first_party_license_observed": true,
+      "consumer_acceptance": "accepted",
+      "rights_acceptance": "accepted",
+      "acceptance_evidence_sha256": "a2b9eb088359526a6798547433faaa6bbb71dab0c2e4b8d09a55f55a3a955f7f"
+    },
+    {
+      "repository": "zog144/root-control",
+      "commit": "62dca363d27a043a4b573e5b687f68ab5a16adeb",
+      "package_path": "pyproject.toml",
+      "public_source_observed": true,
+      "first_party_license_observed": true,
+      "consumer_acceptance": "accepted",
+      "rights_acceptance": "accepted",
+      "acceptance_evidence_sha256": "16b36bd727df715ad4bc9690b904a419a435f49b7b74ae90c6e8b034b9898c9d"
+    },
+    {
+      "repository": "zog144/archive-mirror",
+      "commit": "cc9a6bfb2e94750fbf623c2a8bbe2255f9b347db",
+      "package_path": "pyproject.toml",
+      "public_source_observed": true,
+      "first_party_license_observed": true,
+      "consumer_acceptance": "accepted",
+      "rights_acceptance": "accepted",
+      "acceptance_evidence_sha256": "e7019d6cc487c5fb5d67af457b06d2dda60163bbb044f18a450d90783852d9af"
+    },
+    {
+      "repository": "zog144/network-register",
+      "commit": "a271500f108af7db6dab2c8748af2f13f512f6e6",
+      "package_path": "pyproject.toml",
+      "public_source_observed": true,
+      "first_party_license_observed": true,
+      "consumer_acceptance": "accepted",
+      "rights_acceptance": "accepted",
+      "acceptance_evidence_sha256": "bdb7992b0e03341a82982161316feb3d043be923f8f8d77d0ce012b1f6cfdd47"
+    },
+    {
+      "repository": "zog144/host-deploy",
+      "commit": "24be4cd3488ace40488256c3ea4a9cf4408b3130",
+      "package_path": "pyproject.toml",
+      "public_source_observed": true,
+      "first_party_license_observed": true,
+      "consumer_acceptance": "accepted",
+      "rights_acceptance": "accepted",
+      "acceptance_evidence_sha256": "9c5995055ac4d68d8150f5741155a4aec6a75e178d7ad7d188462738b208841d"
+    },
+    {
+      "repository": "zog144/certify-manage",
+      "commit": "a0fd64a824b55b773158920ecc7004c467c4cdbc",
+      "package_path": "pyproject.toml",
+      "public_source_observed": true,
+      "first_party_license_observed": true,
+      "consumer_acceptance": "accepted",
+      "rights_acceptance": "accepted",
+      "acceptance_evidence_sha256": "6d7dba552c3ba75c7432b4841e1cf6afbae3e0ea7e8a1c1040ead8439115bc6a"
+    }
+  ]
+}

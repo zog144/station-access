@@ -1,0 +1,43 @@
+{
+  "schema": "zog-workspace-api-v1",
+  "workspace_id": "11111111-1111-4111-8111-111111111111",
+  "runtime": {
+    "runtime_id": "runtime-001",
+    "application_name": "editor",
+    "instance_id": "editor-001",
+    "expected_launched": {
+      "basis": "controller-persisted-runtime",
+      "state": "running",
+      "generation": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "software": {
+        "basis": "expected-launched",
+        "view": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "artifacts": [
+          "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        ],
+        "binding_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "manifest_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "mount_observation": "not-probed"
+      },
+      "created_at": 1791650000,
+      "completed_at": null
+    },
+    "observed": {
+      "status": "unavailable",
+      "basis": "not-probed",
+      "observed_at": null
+    },
+    "integrity": {
+      "status": "unavailable",
+      "basis": "not-probed"
+    },
+    "programs": [
+      {
+        "name": "editor",
+        "state": "active/running",
+        "result": null,
+        "invocation_id": "0123456789abcdef"
+      }
+    ]
+  }
+}

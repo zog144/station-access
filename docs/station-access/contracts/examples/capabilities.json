@@ -1,0 +1,26 @@
+{
+  "schema": "zog-workspace-api-v1",
+  "principal": {
+    "kind": "service",
+    "grant_id": "22222222-2222-4222-8222-222222222222"
+  },
+  "capabilities": {
+    "workspace_inspection": true,
+    "application_inspection": true,
+    "runtime_inspection": true,
+    "logs": true,
+    "launch": false,
+    "stop": false,
+    "desktop_input": false,
+    "screenshots": false,
+    "live_mount_observation": false
+  },
+  "pagination": {
+    "max_limit": 50,
+    "cursor": "decimal-offset"
+  },
+  "evidence": {
+    "controller_observation": "read-only",
+    "kernel_mounts": "unsupported"
+  }
+}
