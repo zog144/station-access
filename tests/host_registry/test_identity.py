@@ -72,6 +72,108 @@ class IdentityTests(TestCase):
             },
         }
 
+
+    def non_resident_generation(self):
+        # Exact verified host-install schema-2 projection: foreign host OS
+        # remains externally managed and supplies NO resident slot provenance.
+        return {
+            'schema': 2,
+            'source': 'verified-host-install-state-v2',
+            'installation': {
+                'installation_id': 'fdf20ffe-2353-40a8-a198-508e103f4348',
+                'record_id': '23887237-1991-4018-8239-4a792b1b2197',
+                'record_schema': 2,
+                'operation': 'fresh',
+                'installation_mode': 'non-resident',
+            },
+            'host_os': {
+                'management': 'externally-managed',
+                'boot': 'externally-managed',
+                'root_filesystem': 'externally-managed',
+            },
+            'selected_slot': None,
+            'booted_slot': None,
+            'slots': {'HOST-A': None, 'HOST-B': None},
+            'transitional_boot_bundle': None,
+        }
+
+    def test_signed_non_resident_enrollment_and_heartbeat(self):
+        # The real supervised beacon signs this schema-2 report before
+        # station has any assigned Host UUID; approval remains independent.
+        evidence = self.non_resident_generation()
+        self.report['host_generation'] = evidence
+        first = self.pending()
+        self.assertEqual(first.status_code, 202, first.content)
+        self.assertEqual(first.json()['fingerprint'], self.fp)
+        self.assertEqual(EnrollmentRequest.objects.get(pk=self.fp).claims['host_generation'], evidence)
+        self.assertFalse(HostIdentity.objects.exists())
+        host = identity.approve('admin', self.fp, self.fp)
+        response = self.send(self.heartbeat(host))
+        self.assertEqual(response.status_code, 200, response.content)
+        host.refresh_from_db()
+        self.assertEqual(host.report['host_generation'], evidence)
+        # Accepting the non-resident shape must not waive signature binding.
+        self.assertEqual(self.send(self.heartbeat(host, Ed25519PrivateKey.generate())).status_code, 401)
+        host.refresh_from_db()
+        self.assertEqual(host.report['host_generation'], evidence)
+
+    def test_schema_two_resident_installation_keeps_resident_report_v1(self):
+        evidence = self.host_generation()
+        evidence['installation']['record_schema'] = 2
+        self.report['host_generation'] = evidence
+        self.assertEqual(self.pending().status_code, 202)
+        host = identity.approve('admin', self.fp, self.fp)
+        self.assertEqual(self.send(self.heartbeat(host)).status_code, 200)
+        host.refresh_from_db()
+        self.assertEqual(host.report['host_generation'], evidence)
+
+    @override_settings(HOST_ENROLLMENT_PER_ADDRESS=100, HOST_ENROLLMENT_PER_MINUTE=100)
+    def test_non_resident_enrollment_rejects_forged_or_contradictory_provenance(self):
+        evidence = self.non_resident_generation()
+        resident = self.host_generation()
+        alternatives = [
+            ('wrong-schema', {'schema': 1}),
+            ('boolean-schema', {'schema': True}),
+            ('wrong-source', {'source': 'verified-host-install-state-v1'}),
+            ('extra-field', {'unreviewed': 'x'}),
+            ('missing-host-os', {'host_os': None}),
+            ('nonresident-slot', {'selected_slot': 'HOST-A'}),
+            ('booted-slot', {'booted_slot': 'HOST-B'}),
+            ('foreign-bundle', {'transitional_boot_bundle': resident['transitional_boot_bundle']}),
+            ('populated-slot', {'slots': resident['slots']}),
+            ('incomplete-slot-map', {'slots': {'HOST-A': None}}),
+            ('wrong-host-os', {'host_os': {'management': 'externally-managed', 'boot': 'resident', 'root_filesystem': 'externally-managed'}}),
+            ('extra-host-os', {'host_os': dict(evidence['host_os'], owner='caller')}),
+            ('non-dict-host-os', {'host_os': 'externally-managed'}),
+            ('wrong-installation-mode', {'installation': dict(evidence['installation'], installation_mode='resident')}),
+            ('wrong-record-schema', {'installation': dict(evidence['installation'], record_schema=1)}),
+            ('unknown-record-schema', {'installation': dict(evidence['installation'], record_schema=3)}),
+            ('malformed-uuid', {'installation': dict(evidence['installation'], installation_id='not-a-uuid')}),
+            ('extra-installation-field', {'installation': dict(evidence['installation'], selected_slot='HOST-A')}),
+            ('missing-installation-mode', {'installation': {k:v for k,v in evidence['installation'].items() if k != 'installation_mode'}}),
+            ('invalid-operation', {'installation': dict(evidence['installation'], operation='switch-slot')}),
+        ]
+        for label, delta in alternatives:
+            with self.subTest(label=label):
+                self.report['host_generation'] = dict(copy.deepcopy(evidence), **delta)
+                response = self.pending()
+                self.assertEqual(response.status_code, 401, (label, response.content))
+                self.assertFalse(EnrollmentRequest.objects.exists())
+                self.assertFalse(HostIdentity.objects.exists())
+
+    def test_non_resident_invalid_heartbeat_does_not_replace_accepted_report(self):
+        self.report['host_generation'] = self.non_resident_generation()
+        host = self.approved()
+        self.assertEqual(self.send(self.heartbeat(host)).status_code, 200)
+        host.refresh_from_db()
+        original = copy.deepcopy(host.report)
+        bad = self.non_resident_generation()
+        bad['booted_slot'] = 'HOST-A'
+        self.report['host_generation'] = bad
+        self.assertEqual(self.send(self.heartbeat(host)).status_code, 401)
+        host.refresh_from_db()
+        self.assertEqual(host.report, original)
+
     def test_signed_heartbeat_persists_verified_host_generation(self):
         self.report['host_generation'] = self.host_generation()
         host = self.approved()
