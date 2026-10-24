@@ -88,9 +88,21 @@ permission to run the issuer. Source interface:
 [host-discover certificate authority owner handoff](https://github.com/zog144/host-discover/blob/unstable/docs/host-discover/CERTIFICATE-AUTHORITY-OWNER-HANDOFF.md).
 
 The managed assignment capability must not be advertised until the native
-installation has proved a matching reviewed pin. A key replacement/rotation
-or a changed registry, Host UUID, installation UUID or control checkpoint is
-an explicit reviewed transition, not an instruction to overwrite the file.
+installation has proved a matching reviewed pin. **This is an operator-owned
+activation precondition, not a root-pin verification performed by station-access.**
+At this source revision, station's `managed_enabled()` checks the global
+`HOST_CERTIFICATE_ASSIGNMENT_ENABLED` setting, managed-admission enablement
+and local signer availability; the heartbeat additionally requires a managed
+session. Neither check authenticates a remote host's installed root pin or
+provides per-host pin-readback gating. The operator must keep the global
+advertisement disabled unless **every host eligible for the advertised
+capability** has independently accepted native pin evidence, or a separately
+reviewed per-host authorization gate is implemented. Exporter success, a
+managed-session response or a heartbeat capability is not such evidence.
+
+A key replacement/rotation or a changed registry, Host UUID, installation
+UUID or control checkpoint is an explicit reviewed transition, not an
+instruction to overwrite the file.
 
 ## 3. Selected issuer composition belongs to controller owners
 
