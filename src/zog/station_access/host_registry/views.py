@@ -228,7 +228,7 @@ def validate_host_generation(value):
     if not isinstance(slots, dict) or set(slots) != {"HOST-A", "HOST-B"}:
         raise ValueError("Invalid host slot evidence")
     seen = set()
-    generation_pattern = re.compile(r"[A-Za-z0-9._-]{1,128}\\Z")
+    generation_pattern = re.compile(r"[A-Za-z0-9._-]{1,128}\Z")
     for slot in ("HOST-A", "HOST-B"):
         row = slots[slot]
         if row is None:
