@@ -167,24 +167,59 @@ def _canonical_uuid(value):
 
 
 def validate_host_generation(value):
-    if not isinstance(value, dict) or set(value) != {
+    """Closed, mode-specific host-install reports; never infer a resident boot."""
+    if type(value) is not dict:
+        raise ValueError("Invalid host generation evidence")
+    shared = {
         "schema", "source", "installation", "selected_slot", "booted_slot",
         "slots", "transitional_boot_bundle",
-    }:
-        raise ValueError("Invalid host generation evidence")
-    if value["schema"] != 1 or value["source"] != "verified-host-install-state-v1":
+    }
+    schema = value.get("schema")
+    if type(schema) is not int or schema not in (1, 2):
         raise ValueError("Unsupported host generation evidence")
+    if set(value) != shared | ({"host_os"} if schema == 2 else set()):
+        raise ValueError("Invalid host generation evidence")
+    if value["source"] != f"verified-host-install-state-v{schema}":
+        raise ValueError("Unsupported host generation evidence")
+
     installation = value["installation"]
-    if not isinstance(installation, dict) or set(installation) != {
-        "installation_id", "record_id", "record_schema", "operation",
-    }:
+    fields = {"installation_id", "record_id", "record_schema", "operation"}
+    if type(installation) is not dict or set(installation) != (
+            fields | ({"installation_mode"} if schema == 2 else set())):
         raise ValueError("Invalid installation identity")
     if not _canonical_uuid(installation["installation_id"]) or not _canonical_uuid(installation["record_id"]):
         raise ValueError("Invalid installation identity")
-    if installation["record_schema"] != 1 or installation["operation"] not in {
-        "fresh", "upgrade", "reinstall", "migration", "recovery",
-    }:
+    # Resident schema-2 installation records deliberately keep the resident
+    # generation-report v1 wire format, so allow both record versions there.
+    if (type(installation["record_schema"]) is not int
+            or installation["record_schema"] not in (1, 2)
+            or installation["operation"] not in {
+                "fresh", "upgrade", "reinstall", "migration", "recovery",
+            }):
         raise ValueError("Unsupported installation record")
+
+    if schema == 2:
+        # A genuine non-resident installation uses the host OS boot/root
+        # unchanged. A single invented HOST slot or foreign boot-bundle would
+        # convert untrusted runtime observations into false root provenance.
+        if (installation["record_schema"] != 2
+                or installation["installation_mode"] != "non-resident"):
+            raise ValueError("Invalid non-resident installation")
+        host_os = value["host_os"]
+        if (type(host_os) is not dict
+                or set(host_os) != {"management", "boot", "root_filesystem"}
+                or any(type(v) is not str or v != "externally-managed"
+                       for v in host_os.values())):
+            raise ValueError("Invalid externally managed host OS")
+        if (value["selected_slot"] is not None
+                or value["booted_slot"] is not None
+                or type(value["slots"]) is not dict
+                or set(value["slots"]) != {"HOST-A", "HOST-B"}
+                or any(v is not None for v in value["slots"].values())
+                or value["transitional_boot_bundle"] is not None):
+            raise ValueError("Non-resident report cannot claim resident boot")
+        return
+
     if value["selected_slot"] not in {"HOST-A", "HOST-B"}:
         raise ValueError("Invalid selected host slot")
     if value["booted_slot"] not in {None, "HOST-A", "HOST-B"}:
@@ -193,7 +228,7 @@ def validate_host_generation(value):
     if not isinstance(slots, dict) or set(slots) != {"HOST-A", "HOST-B"}:
         raise ValueError("Invalid host slot evidence")
     seen = set()
-    generation_pattern = re.compile(r"[A-Za-z0-9._-]{1,128}\Z")
+    generation_pattern = re.compile(r"[A-Za-z0-9._-]{1,128}\\Z")
     for slot in ("HOST-A", "HOST-B"):
         row = slots[slot]
         if row is None:
