@@ -21,7 +21,7 @@ from .dns_evidence import selection,RegistryEvidenceSource,RegistrySecretResolve
 from .dns_reconcile import controller_lock,serialize_assignment
 from .dns_shared import reconcile_runtime
 from .identity import locked
-from .models import AdditionalDnsAssignment as Assignment,DnsDestination,Host,SecurityAudit,DnsAssignment,ProviderCredential
+from .models import AdditionalDnsAssignment as Assignment,DnsDestination,Host,SecurityAudit,DnsAssignment,ProviderCredential,ManagedDns01Hostname
 
 
 def authorize(destination,actor_id):
@@ -192,7 +192,8 @@ def import_destination(config,data,relative_path, *, collector=None,provider_fac
     with controller_lock(config,modes=('shared',)) as root:
         selected=selection(data);c,b=selected.connection,selected.binding
         if DnsDestination.objects.filter(pk=b.id).exists():raise NetworkError('conflict')
-        prefixes=[config['suffix']]+[v['prefix'] for v in DnsDestination.objects.values_list('selection',flat=True)]
+        prefixes=([config['suffix']]+[v['prefix'] for v in DnsDestination.objects.values_list('selection',flat=True)]
+                  +list(ManagedDns01Hostname.objects.values_list('hostname',flat=True)))
         if any(p==b.prefix or below(p,b.prefix) or below(b.prefix,p) for p in prefixes):raise NetworkError('conflict')
         store=SqliteStateStore(ledger_path(root,relative_path))
         with store.transaction():
