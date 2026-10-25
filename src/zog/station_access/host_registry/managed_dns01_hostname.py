@@ -107,6 +107,8 @@ def review(*, owner, host_id, installation_id, fingerprint, registry_id,
             "schema": 1, "kind": "managed-dns01-hostname", "nonce": str(uuid.uuid4()),
             "owner": owner, "host_id": str(host.pk),
             "installation_id": str(admission.installation_id),
+            "state_volume_id": str(admission.state_volume_id),
+            "authority_id": str(admission.authority_id),
             "fingerprint": fingerprint, "registry_id": registry_id,
             "hostname": hostname, "selection": data,
             "expires_at": int(time.time()) + 600,
@@ -146,6 +148,9 @@ def commit(*, owner, review_id, provider_factory=None, collector=None):
         )
         if host.provider != "generic":
             raise HostnameError("unsupported-host-mode")
+        if (str(admission.state_volume_id) != value["state_volume_id"]
+                or str(admission.authority_id) != value["authority_id"]):
+            raise HostnameError("installation-changed")
         selected = value["selection"]
         existing = ManagedDns01Hostname.objects.filter(host=host).first()
         if existing:
@@ -182,7 +187,10 @@ def commit(*, owner, review_id, provider_factory=None, collector=None):
                 raise HostnameError("hostname-conflict")
             record = ManagedDns01Hostname.objects.create(
                 host=host, hostname=value["hostname"], fingerprint=value["fingerprint"],
-                installation_id=admission.installation_id, registry_id=value["registry_id"],
+                installation_id=admission.installation_id,
+                state_volume_id=admission.state_volume_id,
+                authority_id=admission.authority_id,
+                registry_id=value["registry_id"],
                 credential_id=_uuid(selected["credential_id"]),
                 credential_revision=selected["credential_revision"],
                 zone_id=selected["zone_id"], zone_name=selected["zone_name"],
@@ -232,6 +240,8 @@ def selected(host, hostname, credential_id, revision, zone_id, zone_name, owner)
     if (admission is None or admission.installation_id != grant.installation_id
             or admission.fingerprint != grant.fingerprint
             or admission.registry_id != grant.registry_id
+            or admission.state_volume_id != grant.state_volume_id
+            or admission.authority_id != grant.authority_id
             or not HostIdentity.objects.filter(
                 host=host, status="approved", fingerprint=grant.fingerprint).exists()
             or not allowed(str(host.pk), grant.fingerprint, admission.claims.get("jti"))):
