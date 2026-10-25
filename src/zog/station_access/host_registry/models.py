@@ -267,6 +267,8 @@ class ManagedDns01Hostname(models.Model):
     hostname = models.CharField(max_length=253, unique=True)
     fingerprint = models.CharField(max_length=64)
     installation_id = models.UUIDField()
+    state_volume_id = models.UUIDField()
+    authority_id = models.UUIDField()
     registry_id = models.CharField(max_length=64)
     credential = models.ForeignKey(ProviderCredential, on_delete=models.PROTECT)
     credential_revision = models.PositiveBigIntegerField()
