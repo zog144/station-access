@@ -14,7 +14,7 @@ from zog.network_register.store import SqliteStateStore
 from .dns_evidence import owner_authorized,selection,RegistryEvidenceSource,RegistrySecretResolver
 from .dns_reconcile import controller_lock
 from .dns_cutover import load_review
-from .models import ProviderCredential,DnsDestination,SecurityAudit
+from .models import ProviderCredential,DnsDestination,SecurityAudit,ManagedDns01Hostname
 from .identity import locked
 
 PORKBUN_NS=['curitiba.ns.porkbun.com','fortaleza.ns.porkbun.com','maceio.ns.porkbun.com','salvador.ns.porkbun.com']
@@ -58,7 +58,8 @@ def zones(owner,credential_id,revision,cursor=None,*,provider_factory=None):
  except NetworkError as e:raise Blocked('domain-access',e.code) from None
 
 def scope_available(config,prefix,exclude=None):
- prefixes=[config['suffix']]+[x['prefix'] for x in DnsDestination.objects.exclude(pk=exclude).values_list('selection',flat=True)]
+ prefixes=([config['suffix']]+[x['prefix'] for x in DnsDestination.objects.exclude(pk=exclude).values_list('selection',flat=True)]
+           +list(ManagedDns01Hostname.objects.values_list('hostname',flat=True)))
  if any(p==prefix or below(p,prefix) or below(prefix,p) for p in prefixes):raise Blocked('namespace')
 
 def candidate(owner,credential_id,revision,zone_id,label,*,binding_id=None,provider_factory=None):
