@@ -193,7 +193,7 @@ class AssignmentTests(TestCase):
 
     def test_generic_managed_dns01_bound_name_signing_no_a_record(self):
         from zog.station_access.host_registry import certificate_assignment as assign
-        from zog.station_access.host_registry.models import ManagedDns01Hostname, DnsAssignment
+        from zog.station_access.host_registry.models import ManagedDns01Hostname, DnsAssignment, CertificateAssignment
         grant = self.approved_dns01_name()
         self.assertFalse(DnsAssignment.objects.filter(host=self.host).exists())
         self.params["binding_id"] = "managed-dns01"
@@ -205,7 +205,7 @@ class AssignmentTests(TestCase):
         signed = self.assert_receipt(approved.json()["receipt"])
         self.assertEqual(signed["host_id"], str(self.host.pk))
         self.assertEqual(signed["installation_id"], MANAGED)
-        self.assertEqual(signed["binding_id"], "managed-dns01")
+        self.assertEqual(CertificateAssignment.objects.get(host=self.host).binding_id, "managed-dns01")
         self.assertEqual(assign.current(self.host)["state"], "approved")
         grant.active = False
         grant.save(update_fields=["active"])
@@ -215,6 +215,8 @@ class AssignmentTests(TestCase):
         grant = self.approved_dns01_name()
         self.params["binding_id"] = "managed-dns01"
         self.params["policy"]["hostnames"] = [grant.hostname]
+        self.params["policy"]["challenge"] = "http-01"
+        self.params["policy"]["dns_plugin"] = None
         self.assertEqual(self.submit().json()["code"], "zone-not-approved")
         self.params["policy"]["challenge"] = "dns-01"
         self.params["policy"]["dns_plugin"] = "dns-cloudflare"
