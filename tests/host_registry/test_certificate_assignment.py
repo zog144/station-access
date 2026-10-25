@@ -229,6 +229,52 @@ class AssignmentTests(TestCase):
         ManagedAdmission.objects.filter(host=self.host).update(installation_id=uuid.uuid4())
         self.assertEqual(self.submit().json()["code"], "hostname-authority-unavailable")
 
+    def test_dns01_grant_fences_state_authority_registry_and_session_changes(self):
+        from zog.station_access.host_registry.models import ManagedDns01Hostname
+        from zog.station_access.host_registry.dns_setup import scope_available, Blocked
+        grant = self.approved_dns01_name()
+        self.params["binding_id"] = "managed-dns01"
+        self.params["policy"]["hostnames"] = [grant.hostname]
+        self.params["policy"]["challenge"] = "dns-01"
+        self.params["policy"]["dns_plugin"] = "dns-cloudflare"
+        self.assertEqual(self.submit().status_code, 200)
+        from zog.station_access.host_registry import certificate_assignment as assignment
+        admission = ManagedAdmission.objects.get(host=self.host)
+        initial = {
+            "state_volume_id": admission.state_volume_id,
+            "authority_id": admission.authority_id,
+            "registry_id": admission.registry_id,
+            "claims": dict(admission.claims),
+        }
+        cases = [
+            ("state_volume_id", uuid.uuid4()),
+            ("authority_id", uuid.uuid4()),
+            ("registry_id", "different-registry"),
+            ("claims", dict(initial["claims"], exp=0)),
+        ]
+        for field, replacement in cases:
+            with self.subTest(field=field):
+                setattr(admission, field, replacement)
+                admission.save(update_fields=[field])
+                self.assertEqual(assignment.current(self.host)["state"], "conflict")
+                self.params["operation_id"] = str(uuid.uuid4())
+                self.assertEqual(self.submit().json()["code"], "hostname-authority-unavailable")
+                setattr(admission, field, initial[field])
+                admission.save(update_fields=[field])
+                self.assertEqual(assignment.current(self.host)["state"], "approved")
+        self.host.provider = "aws"
+        self.host.save(update_fields=["provider"])
+        self.assertEqual(assignment.current(self.host)["state"], "conflict")
+        self.host.provider = "generic"
+        self.host.save(update_fields=["provider"])
+        self.assertEqual(assignment.current(self.host)["state"], "approved")
+        self.assertEqual(ManagedDns01Hostname.objects.get(host=self.host).hostname, grant.hostname)
+        with self.assertRaises(Blocked):
+            scope_available(
+                {"suffix": "hosts.example.test"},
+                grant.hostname,
+            )
+
     def test_dns01_grant_refuses_expired_host_session_and_revokes_safely(self):
         from zog.station_access.host_registry import managed_dns01_hostname as owner
         from zog.station_access.host_registry.models import CertificateAssignment
