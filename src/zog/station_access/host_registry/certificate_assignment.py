@@ -41,7 +41,7 @@ def _uuid(value):
     return u
 
 
-def _source(origin, host_id, binding_id, hostname, credential_id, revision, zone_id, zone_name, actor):
+def _source(origin, host_id, binding_id, hostname, credential_id, revision, zone_id, zone_name, actor, challenge):
     """Read the reviewed station DNS identity, never trust caller's zone claim."""
     if origin == "managed":
         if host_id is None:
@@ -62,6 +62,19 @@ def _source(origin, host_id, binding_id, hostname, credential_id, revision, zone
         host = None
     else:
         raise AssignmentError("invalid-origin")
+
+    if binding_id == "managed-dns01":
+        # This hostname authority is a separately reviewed Cloudflare DNS-01
+        # intent for the very same approved managed HostIdentity/installation.
+        # It neither claims AWS provenance nor publishes an A/AAAA record.
+        if origin != "managed" or challenge != "dns-01":
+            raise AssignmentError("zone-not-approved")
+        from .managed_dns01_hostname import selected
+        credential = selected(host, hostname, credential_id, revision,
+                              zone_id, zone_name, actor)
+        if credential is None:
+            raise AssignmentError("hostname-authority-unavailable")
+        return host, installation_id, credential
 
     if binding_id == "primary":
         if origin != "managed":
@@ -271,7 +284,7 @@ def change(value, actor):
             host, installation_id, credential = _source(
                 value["origin"], value["host_id"], value["binding_id"], hostname,
                 value["credential_id"], value["credential_revision"],
-                value["zone_id"], value["zone_name"], actor)
+                value["zone_id"], value["zone_name"], actor, auth.challenge)
             latest = CertificateAssignment.objects.filter(
                 installation_id=installation_id).order_by("-revision","-updated_at").first()
             if latest and latest.state == "approved":
@@ -346,6 +359,16 @@ def current(host, fingerprint=None):
         return {"state": "conflict", "receipt": None}
     # Local Django projections remain evidence, not new DNS observations.
     # Any withdrawal or revision change fences the prior assignment receipt.
+    if row.binding_id == "managed-dns01":
+        from .managed_dns01_hostname import selected
+        from .models import ManagedDns01Hostname
+        bound = ManagedDns01Hostname.objects.filter(host=host).first()
+        if (bound is None or selected(
+                host, row.hostname, str(row.credential_id),
+                row.credential_revision, row.zone_id, row.zone_name,
+                bound.owner_user_id) is None):
+            return {"state": "conflict", "receipt": None}
+        return {"state": "approved", "receipt": row.receipt}
     if row.binding_id == "primary":
         dns = DnsAssignment.objects.filter(host=host).first()
     else:

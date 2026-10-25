@@ -260,6 +260,27 @@ class CertificateSetupProposal(models.Model):
     revision = models.PositiveBigIntegerField(default=0)
     updated_at = models.DateTimeField(auto_now=True)
 
+
+class ManagedDns01Hostname(models.Model):
+    """Reviewed DNS-01 name authority; not a published A record or issuer grant."""
+    host = models.OneToOneField(Host, on_delete=models.PROTECT, primary_key=True)
+    hostname = models.CharField(max_length=253, unique=True)
+    fingerprint = models.CharField(max_length=64)
+    installation_id = models.UUIDField()
+    state_volume_id = models.UUIDField()
+    authority_id = models.UUIDField()
+    registry_id = models.CharField(max_length=64)
+    credential = models.ForeignKey(ProviderCredential, on_delete=models.PROTECT)
+    credential_revision = models.PositiveBigIntegerField()
+    zone_id = models.CharField(max_length=100)
+    zone_name = models.CharField(max_length=253)
+    owner_user_id = models.PositiveBigIntegerField()
+    review_id = models.CharField(max_length=64)
+    active = models.BooleanField(default=True)
+    revision = models.PositiveBigIntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
 class CertificateAssignment(models.Model):
     """Station-approved bound hostname intent, not an issuer policy."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
