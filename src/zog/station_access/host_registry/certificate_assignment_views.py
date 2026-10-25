@@ -7,7 +7,7 @@ from django.db import OperationalError
 from zog.host_identify import signatures
 from .views import administrator, body
 from . import certificate_assignment as assignment, identity
-from .models import HostIdentity, Host, CertificateAssignment, DnsDestination, ManagedAdmission, DnsAssignment, AdditionalDnsAssignment, ProviderCredential
+from .models import HostIdentity, Host, CertificateAssignment, DnsDestination, ManagedAdmission, DnsAssignment, AdditionalDnsAssignment, ProviderCredential, ManagedDns01Hostname
 
 
 def response(data,status=200):
@@ -44,6 +44,18 @@ def administration(request):
                 "credential_id":str(credential.pk),
                 "credential_revision":credential.revision,
             })
+        for grant in ManagedDns01Hostname.objects.filter(active=True, owner_user_id=request.user.pk)[:100]:
+            credential = ProviderCredential.objects.filter(
+                pk=grant.credential_id, revision=grant.credential_revision,
+                provider="cloudflare").first()
+            if credential:
+                bindings.append({
+                    "binding_id": "managed-dns01", "zone_id": grant.zone_id,
+                    "zone_name": grant.zone_name, "prefix": grant.hostname,
+                    "credential_id": str(credential.pk),
+                    "credential_revision": credential.revision,
+                    "host_id": str(grant.host_id), "hostname": grant.hostname,
+                })
         hosts=[]
         for admission in ManagedAdmission.objects.select_related("host").all()[:100]:
             host=admission.host
@@ -54,6 +66,8 @@ def administration(request):
             names = list(DnsAssignment.objects.filter(host=host,enabled=True).values_list("name",flat=True))
             names += list(AdditionalDnsAssignment.objects.filter(
                 host=host,enabled=True,phase="ready").values_list("name",flat=True))
+            names += list(ManagedDns01Hostname.objects.filter(
+                host=host,active=True).values_list("hostname",flat=True))
             hosts.append({"host_id":str(host.pk),"installation_id":str(admission.installation_id),
                           "label":host.label[:100],"dns_names":names[:20]})
         return response({"schema": assignment.SCHEMA, "read_only": True,
