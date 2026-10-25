@@ -109,7 +109,7 @@ def review(*, owner, host_id, installation_id, fingerprint, registry_id,
             "installation_id": str(admission.installation_id),
             "fingerprint": fingerprint, "registry_id": registry_id,
             "hostname": hostname, "selection": data,
-            "expires_at": time.time() + 600,
+            "expires_at": int(time.time()) + 600,
         }
         review_id = digest(value)
         save(root / ("dns01-hostname-review-" + review_id + ".json"), value)
