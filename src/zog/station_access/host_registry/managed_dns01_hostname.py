@@ -229,6 +229,12 @@ def revoke(*, owner, host_id, expected_revision):
 
 def selected(host, hostname, credential_id, revision, zone_id, zone_name, owner):
     """Strict replay-time check used by both signing and signed retrieval."""
+    if host.provider != "generic":
+        return None
+    try:
+        owner_authorized(owner)
+    except NetworkError:
+        return None
     grant = ManagedDns01Hostname.objects.filter(host=host, active=True).first()
     if (grant is None or grant.hostname != hostname or grant.owner_user_id != owner
             or str(grant.credential_id) != str(credential_id)
