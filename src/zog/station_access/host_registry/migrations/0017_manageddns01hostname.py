@@ -14,6 +14,8 @@ class Migration(migrations.Migration):
                 ("hostname", models.CharField(max_length=253, unique=True)),
                 ("fingerprint", models.CharField(max_length=64)),
                 ("installation_id", models.UUIDField()),
+                ("state_volume_id", models.UUIDField()),
+                ("authority_id", models.UUIDField()),
                 ("registry_id", models.CharField(max_length=64)),
                 ("credential_revision", models.PositiveBigIntegerField()),
                 ("zone_id", models.CharField(max_length=100)),
