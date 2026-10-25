@@ -26,7 +26,7 @@ from .models import (
 )
 
 BINDING = "managed-dns01"
-NAME = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\Z")
+NAME = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
 
 
 class HostnameError(ValueError):
