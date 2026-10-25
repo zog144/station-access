@@ -133,6 +133,123 @@ class AssignmentTests(TestCase):
         self.admin_url="/api/setup/certificate-assignments/"
         self.host_url=f"/api/hosts/{self.host.pk}/certificate-assignment/"
 
+
+    def approved_dns01_name(self):
+        """Review/commit a generic Host's exact DNS-01 name; never seed A records."""
+        from zog.station_access.host_registry import managed_dns01_hostname as owner
+        from zog.station_access.host_registry.models import ManagedDns01Hostname
+        from contextlib import nullcontext
+        from unittest.mock import patch
+        name = "issuer.example.test"
+        proposal = {
+            "schema": 1, "owner_user_id": self.admin.pk,
+            "credential_id": str(self.credential.pk),
+            "credential_revision": self.credential.revision,
+            "zone_id": "zone-identifier", "zone_name": self.zone,
+            "prefix": name, "binding_id": "review-test-binding",
+            "binding_revision": 1, "nameservers": ["ns1.example.test"],
+            "host_ids": [],
+        }
+        config = {
+            "domain": self.zone, "suffix": "hosts.example.test",
+            "state_directory": str(Path(self.tmp.name)),
+        }
+        fp = signatures.fingerprint(self.host_key.public_key())
+        admission = ManagedAdmission.objects.get(host=self.host)
+        mocks = [
+            patch.object(owner, "configuration", return_value=config),
+            patch.object(owner, "controller_lock", side_effect=lambda config, modes: nullcontext(Path(self.tmp.name))),
+            patch.object(owner.dns_setup, "candidate", return_value=proposal),
+            patch.object(owner.dns_setup, "validate"),
+            patch.object(owner.dns_setup, "scope_available"),
+        ]
+        from contextlib import ExitStack
+        with ExitStack() as stack:
+            for mocked in mocks:
+                stack.enter_context(mocked)
+            reviewed = owner.review(
+                owner=self.admin.pk, host_id=str(self.host.pk),
+                installation_id=MANAGED, fingerprint=fp,
+                registry_id=admission.registry_id, hostname=name,
+                credential_id=str(self.credential.pk),
+                credential_revision=self.credential.revision,
+                zone_id="zone-identifier",
+            )
+            self.assertEqual(reviewed["provider_writes"], 0)
+            self.assertFalse(ManagedDns01Hostname.objects.exists())
+            receipt = owner.commit(owner=self.admin.pk, review_id=reviewed["review_id"])
+            self.assertEqual(receipt["provider_writes"], 0)
+            self.assertFalse(receipt["replayed"])
+            again = owner.commit(owner=self.admin.pk, review_id=reviewed["review_id"])
+            self.assertTrue(again["replayed"])
+        self.assertEqual(ManagedDns01Hostname.objects.count(), 1)
+        self.assertEqual(self.host.provider, "generic")
+        self.assertFalse(self.host.dns_assignment if hasattr(self.host, "dns_assignment") else False)
+        grant = ManagedDns01Hostname.objects.get(host=self.host)
+        self.assertEqual(grant.fingerprint, fp)
+        self.assertEqual(grant.installation_id, uuid.UUID(MANAGED))
+        self.assertEqual(grant.review_id, reviewed["review_id"])
+        return grant
+
+    def test_generic_managed_dns01_bound_name_signing_no_a_record(self):
+        from zog.station_access.host_registry import certificate_assignment as assign
+        from zog.station_access.host_registry.models import ManagedDns01Hostname, DnsAssignment
+        grant = self.approved_dns01_name()
+        self.assertFalse(DnsAssignment.objects.filter(host=self.host).exists())
+        self.params["binding_id"] = "managed-dns01"
+        self.params["policy"]["hostnames"] = [grant.hostname]
+        self.params["policy"]["challenge"] = "dns-01"
+        self.params["policy"]["dns_plugin"] = "dns-cloudflare"
+        approved = self.submit()
+        self.assertEqual(approved.status_code, 200, approved.content)
+        signed = self.assert_receipt(approved.json()["receipt"])
+        self.assertEqual(signed["host_id"], str(self.host.pk))
+        self.assertEqual(signed["installation_id"], MANAGED)
+        self.assertEqual(signed["binding_id"], "managed-dns01")
+        self.assertEqual(assign.current(self.host)["state"], "approved")
+        grant.active = False
+        grant.save(update_fields=["active"])
+        self.assertEqual(assign.current(self.host)["state"], "conflict")
+
+    def test_generic_dns01_refuses_http_and_unreviewed_hostname(self):
+        grant = self.approved_dns01_name()
+        self.params["binding_id"] = "managed-dns01"
+        self.params["policy"]["hostnames"] = [grant.hostname]
+        self.assertEqual(self.submit().json()["code"], "zone-not-approved")
+        self.params["policy"]["challenge"] = "dns-01"
+        self.params["policy"]["dns_plugin"] = "dns-cloudflare"
+        self.params["policy"]["hostnames"] = ["other.example.test"]
+        self.assertEqual(self.submit().json()["code"], "hostname-authority-unavailable")
+        self.params["policy"]["hostnames"] = [grant.hostname]
+        self.params["credential_revision"] += 1
+        self.assertEqual(self.submit().json()["code"], "hostname-authority-unavailable")
+        self.params["credential_revision"] -= 1
+        ManagedAdmission.objects.filter(host=self.host).update(installation_id=uuid.uuid4())
+        self.assertEqual(self.submit().json()["code"], "hostname-authority-unavailable")
+
+    def test_dns01_grant_refuses_expired_host_session_and_revokes_safely(self):
+        from zog.station_access.host_registry import managed_dns01_hostname as owner
+        from zog.station_access.host_registry.models import CertificateAssignment
+        grant = self.approved_dns01_name()
+        self.params["binding_id"] = "managed-dns01"
+        self.params["policy"]["hostnames"] = [grant.hostname]
+        self.params["policy"]["challenge"] = "dns-01"
+        self.params["policy"]["dns_plugin"] = "dns-cloudflare"
+        self.assertEqual(self.submit().status_code, 200)
+        with patch.object(owner, "configuration", return_value={"domain": self.zone}):
+            with patch.object(owner, "controller_lock", side_effect=lambda config, modes: nullcontext()):
+                with self.assertRaisesRegex(owner.HostnameError, "certificate-revoke-required"):
+                    owner.revoke(owner=self.admin.pk, host_id=str(self.host.pk), expected_revision=1)
+                revoked = dict(self.params, action="revoke", expected_revision=1,
+                               operation_id=str(uuid.uuid4()))
+                self.assertEqual(self.submit(revoked).status_code, 200)
+                receipt = owner.revoke(owner=self.admin.pk,
+                                       host_id=str(self.host.pk), expected_revision=1)
+                self.assertFalse(receipt["active"])
+        self.assertFalse(CertificateAssignment.objects.filter(host=self.host,state="approved").exists())
+        self.params["operation_id"] = str(uuid.uuid4())
+        self.assertEqual(self.submit().json()["code"], "hostname-authority-unavailable")
+
     def submit(self, payload=None):
         return self.client.post(self.admin_url, canonical(payload or self.params),
                                 content_type="application/json")
