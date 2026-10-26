@@ -293,23 +293,40 @@ def commit(*, owner, review_id, collector=None, provider_factory=None):
                 raise EmptyBootstrapError("existing-dns-ownership")
             if int(time.time()) > data["expires_at"]:
                 raise EmptyBootstrapError("review-expired")
+            stage = "reserved"
         else:
-            _read_file(marker_path, marker)
+            try:
+                raw = json.loads(marker_path.read_bytes())
+            except (OSError, ValueError, UnicodeError):
+                raise EmptyBootstrapError("controller-state-unavailable") from None
+            if (not isinstance(raw, dict) or
+                    {k: raw.get(k) for k in marker} != marker or
+                    set(raw) != set(marker) | {"stage"} or
+                    raw["stage"] not in ("reserved", "creating-ledger", "ledger-ready")):
+                raise EmptyBootstrapError("controller-state-conflict")
+            stage = raw["stage"]
         # Always recheck credential, active zone, delegation and complete
         # inventory BEFORE publishing or reopening an accepted controller.
         _provider_check(data, collector=collector, provider_factory=provider_factory)
         if not existing:
-            _exclusive_json(marker_path, marker)
-        # Crash-safe create from exactly this prepared review. An existing
-        # missing ledger is an integrity fault, never an invitation to reset.
+            _exclusive_json(marker_path, dict(marker, stage=stage))
         store_path = root / ("dns-ledger-" + review_id + ".sqlite3")
-        if not (root / "network-register").exists():
+        if stage == "reserved":
             if store_path.exists() or config_path.exists() or (root / "controller.json").exists():
                 raise EmptyBootstrapError("controller-state-conflict")
+            # Persist intent BEFORE filesystem creation. If the subsequent
+            # ledger is missing, this is uncertain/lost history, not a reason
+            # to reinitialize it under the same identity.
+            stage = "creating-ledger"
+            save(marker_path, dict(marker, stage=stage))
             (root / "network-register").mkdir(mode=0o700)
-        _directory(root / "network-register")
-        _ledger(root, review_id, data, allow_create=not store_path.exists()
-                and not config_path.exists() and not (root / "controller.json").exists())
+            _directory(root / "network-register")
+            _ledger(root, review_id, data, allow_create=True)
+            stage = "ledger-ready"
+            save(marker_path, dict(marker, stage=stage))
+        else:
+            _directory(root / "network-register")
+            _ledger(root, review_id, data, allow_create=False)
         config = _config(data, root)
         _exclusive_json(config_path, config)
         ctrl = dict(schema=2, binding=legacy_binding(config), writer="shared",
@@ -343,7 +360,7 @@ def inspect(*, owner, review_id):
             raise EmptyBootstrapError("wrong-review-owner")
         marker = dict(schema=1, kind="empty-shared-dns-bootstrap",
                       review_id=review_id, owner=owner)
-        _read_file(root / "empty-bootstrap.json", marker)
+        _read_file(root / "empty-bootstrap.json", dict(marker, stage="ledger-ready"))
         config = _config(data, root)
         _read_file(config_path, config)
         _ledger(root, review_id, data, allow_create=False)
