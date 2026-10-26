@@ -70,7 +70,7 @@ def _write_identity(path, identity):
     except FileExistsError:
         raise NetworkError("storage") from None
     try:
-        raw = json.dumps(dict(schema=1, **identity), sort_keys=True).encode() + b"\\n"
+        raw = json.dumps(dict(schema=1, **identity), sort_keys=True).encode() + b"\n"
         os.write(fd, raw)
         os.fsync(fd)
     finally:
