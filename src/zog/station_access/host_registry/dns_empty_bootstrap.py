@@ -318,7 +318,9 @@ def verify_runtime(root, state, reviewed, store):
     if reviewed != data:
         raise EmptyBootstrapError("review-mismatch")
     marker = _read_file(root / "empty-bootstrap.json", None)
-    if (marker.get("review_id") != key or marker.get("stage") != "ledger-ready"
+    if (type(marker) is not dict or marker.get("schema") != 1
+            or marker.get("kind") != "empty-shared-dns-bootstrap"
+            or marker.get("review_id") != key or marker.get("stage") != "ledger-ready"
             or marker.get("owner") != data["owner"]
             or set(marker) != {"schema", "kind", "owner", "review_id",
                                "stage", "ledger_identity"}):
@@ -326,6 +328,8 @@ def verify_runtime(root, state, reviewed, store):
     if marker["ledger_identity"] != _ledger_identity(store.path):
         raise EmptyBootstrapError("ledger-file-identity-changed")
     _static_ledger(store, key, data, empty=False)
+    if marker["ledger_identity"] != _ledger_identity(store.path):
+        raise EmptyBootstrapError("ledger-file-identity-changed")
 
 
 def _ledger(root, key, data, *, allow_create, empty=True):
