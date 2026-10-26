@@ -286,11 +286,13 @@ class EmptySharedBootstrapTests(TestCase):
         config = json.loads((self.root / "configuration.json").read_text())
         path = self.root / "controller.lock"
         original_inode = path.stat().st_ino
+        replacement = self.root / "replacement-inode"
+        replacement.write_text("replacement")
+        replacement.chmod(0o600)
+        self.assertNotEqual(original_inode, replacement.stat().st_ino)
         with self.assertRaises(NetworkError):
             with controller_lock(config, modes=("shared",)):
-                path.unlink()
-                path.write_text("replacement")
-                path.chmod(0o600)
+                os.replace(replacement, path)
                 self.assertNotEqual(original_inode, path.stat().st_ino)
                 # A new worker must refuse the replacement pathname,
                 # even while the original inode remains locked.
