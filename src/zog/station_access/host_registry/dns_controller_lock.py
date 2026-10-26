@@ -16,7 +16,8 @@ from zog.network_register.contracts import NetworkError
 
 def _details(fd):
     v = os.fstat(fd)
-    if not stat.S_ISREG(v.st_mode) or v.st_uid != os.geteuid() or v.st_mode & 0o077:
+    if (not stat.S_ISREG(v.st_mode) or v.st_uid != os.geteuid()
+            or stat.S_IMODE(v.st_mode) != 0o600 or v.st_nlink != 1):
         raise NetworkError("storage")
     return {"device": v.st_dev, "inode": v.st_ino}
 
@@ -28,23 +29,38 @@ def _matches(path, fd, expected):
     except OSError:
         raise NetworkError("storage") from None
     if (not stat.S_ISREG(current.st_mode) or current.st_uid != os.geteuid()
-            or current.st_mode & 0o077 or
+            or stat.S_IMODE(current.st_mode) != 0o600 or current.st_nlink != 1 or
             (current.st_dev, current.st_ino) !=
             (recorded["device"], recorded["inode"]) or recorded != expected):
         raise NetworkError("storage")
 
 
 def _read_identity(root):
+    """Reopen exactly the original marker (and adoption receipt, if present).
+
+    Avoid prefix-only JSON reads and path-to-descriptor substitutions: a
+    second writer must never bind to an unverified replacement inode.
+    """
     path = root / "controller-lock-identity.json"
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
         try:
             _details(fd)
-            raw = os.read(fd, 2048)
+            before = os.fstat(fd)
+            if before.st_size <= 0 or before.st_size > 2048:
+                raise NetworkError("storage")
+            raw = os.read(fd, before.st_size + 1)
             identity = json.loads(raw)
+            after = os.fstat(fd)
+            current = os.stat(path, follow_symlinks=False)
+            if (len(raw) != before.st_size or after.st_size != before.st_size
+                    or after.st_mtime_ns != before.st_mtime_ns
+                    or (after.st_dev, after.st_ino) !=
+                       (current.st_dev, current.st_ino)):
+                raise NetworkError("storage")
         finally:
             os.close(fd)
-    except (OSError, ValueError, TypeError):
+    except (OSError, ValueError, TypeError, UnicodeError):
         raise NetworkError("storage") from None
     if (type(identity) is not dict or set(identity) not in (
             {"schema", "device", "inode"},
@@ -56,31 +72,41 @@ def _read_identity(root):
     if "adoption_review_id" in identity:
         import hashlib
         key = identity["adoption_review_id"]
-        if type(key) is not str or len(key) != 64 or any(c not in "0123456789abcdef" for c in key):
+        if (type(key) is not str or len(key) != 64
+                or any(c not in "0123456789abcdef" for c in key)):
             raise NetworkError("storage")
         receipt = root / ("dns-review-" + key + ".json")
         try:
-            rfd = os.open(receipt, os.O_RDONLY | os.O_NOFOLLOW)
+            rfd = os.open(receipt, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
             try:
+                _details(rfd)
                 st = os.fstat(rfd)
-                content = os.read(rfd, 65537)
+                if st.st_size <= 0 or st.st_size > 65536:
+                    raise NetworkError("storage")
+                content = os.read(rfd, st.st_size + 1)
                 state = json.loads(content)
+                later = os.fstat(rfd)
                 now = os.stat(receipt, follow_symlinks=False)
             finally:
                 os.close(rfd)
-            if (not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid()
-                    or st.st_mode & 0o077 or st.st_nlink != 1
+            if (len(content) != st.st_size
+                    or later.st_size != st.st_size
+                    or later.st_mtime_ns != st.st_mtime_ns
                     or (now.st_dev, now.st_ino) != (st.st_dev, st.st_ino)
-                    or len(content) > 65536 or type(state) is not dict
+                    or type(state) is not dict
+                    or set(state) !=
+                    {"schema", "kind", "owner", "nonce", "expires_at", "snapshot"}
+                    or state.get("schema") != 1
                     or state.get("kind") != "existing-empty-dns-lock-adoption"
                     or hashlib.sha256(json.dumps(state, sort_keys=True,
-                       separators=(",", ":")).encode()).hexdigest() != key
-                    or not any(x.get("name") == "controller.lock"
+                       separators=(",", ":"), allow_nan=False).encode()).hexdigest() != key
+                    or not any(type(x) is dict
+                        and x.get("name") == "controller.lock"
                         and x.get("device") == identity["device"]
                         and x.get("inode") == identity["inode"]
                         for x in state.get("snapshot", {}).get("entries", []))):
                 raise NetworkError("storage")
-        except (OSError, ValueError, TypeError, AttributeError):
+        except (OSError, ValueError, TypeError, AttributeError, UnicodeError):
             raise NetworkError("storage") from None
     return {"device": identity["device"], "inode": identity["inode"]}
 
