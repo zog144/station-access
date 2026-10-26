@@ -46,11 +46,42 @@ def _read_identity(root):
             os.close(fd)
     except (OSError, ValueError, TypeError):
         raise NetworkError("storage") from None
-    if (type(identity) is not dict or set(identity) != {"schema", "device", "inode"}
+    if (type(identity) is not dict or set(identity) not in (
+            {"schema", "device", "inode"},
+            {"schema", "device", "inode", "adoption_review_id"})
             or identity["schema"] != 1 or
             type(identity["device"]) is not int or type(identity["inode"]) is not int
             or identity["device"] <= 0 or identity["inode"] <= 0):
         raise NetworkError("storage")
+    if "adoption_review_id" in identity:
+        import hashlib
+        key = identity["adoption_review_id"]
+        if type(key) is not str or len(key) != 64 or any(c not in "0123456789abcdef" for c in key):
+            raise NetworkError("storage")
+        receipt = root / ("dns-review-" + key + ".json")
+        try:
+            rfd = os.open(receipt, os.O_RDONLY | os.O_NOFOLLOW)
+            try:
+                st = os.fstat(rfd)
+                content = os.read(rfd, 65537)
+                state = json.loads(content)
+                now = os.stat(receipt, follow_symlinks=False)
+            finally:
+                os.close(rfd)
+            if (not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid()
+                    or st.st_mode & 0o077 or st.st_nlink != 1
+                    or (now.st_dev, now.st_ino) != (st.st_dev, st.st_ino)
+                    or len(content) > 65536 or type(state) is not dict
+                    or state.get("kind") != "existing-empty-dns-lock-adoption"
+                    or hashlib.sha256(json.dumps(state, sort_keys=True,
+                       separators=(",", ":")).encode()).hexdigest() != key
+                    or not any(x.get("name") == "controller.lock"
+                        and x.get("device") == identity["device"]
+                        and x.get("inode") == identity["inode"]
+                        for x in state.get("snapshot", {}).get("entries", []))):
+                raise NetworkError("storage")
+        except (OSError, ValueError, TypeError, AttributeError):
+            raise NetworkError("storage") from None
     return {"device": identity["device"], "inode": identity["inode"]}
 
 
