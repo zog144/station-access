@@ -251,7 +251,7 @@ def _ledger(root, key, data, *, allow_create):
         raise EmptyBootstrapError("missing-controller-ledger")
     store = SqliteStateStore(path, create=not path.exists())
     selected = _selection_valid(data)
-    conn, binding = asdict(selected.connection), asdict(selected.binding)
+    conn, binding = asdict(selected.connection), json.loads(json.dumps(asdict(selected.binding)))
     with store.transaction():
         meta = store.read("meta", "empty-bootstrap")
         if meta is None:
