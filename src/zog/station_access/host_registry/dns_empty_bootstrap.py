@@ -247,32 +247,110 @@ def _exclusive_json(path, value):
         raise
 
 
-def _ledger(root, key, data, *, allow_create):
+def _ledger_identity(path):
+    """Attest the real immutable SQLite file identity, not merely its name."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        try:
+            st = os.fstat(fd)
+            current = os.stat(path, follow_symlinks=False)
+            if (not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid()
+                    or st.st_mode & 0o077
+                    or not stat.S_ISREG(current.st_mode)
+                    or (st.st_dev, st.st_ino) != (current.st_dev, current.st_ino)):
+                raise EmptyBootstrapError("unsafe-controller-ledger")
+            return dict(device=st.st_dev, inode=st.st_ino)
+        finally:
+            os.close(fd)
+    except OSError:
+        raise EmptyBootstrapError("missing-or-unsafe-controller-ledger") from None
+
+
+def _static_ledger(store, key, data, *, empty):
+    """Exact static owner attestation; empty before writer activation only."""
+    selected = _selection_valid(data)
+    conn = asdict(selected.connection)
+    binding = json.loads(json.dumps(asdict(selected.binding)))
+    with store.transaction():
+        db = store._db()  # Inspect keys as well as values: no foreign rows.
+        rows = db.execute("SELECT kind, key, value FROM objects").fetchall()
+        values = {}
+        for kind, name, raw in rows:
+            try:
+                values[(kind, name)] = json.loads(raw)
+            except (ValueError, TypeError):
+                raise EmptyBootstrapError("invalid-controller-ledger") from None
+        required = {
+            ("meta", "schema"): {"version": 1},
+            ("meta", "cutover"): {"review_id": key},
+            ("meta", "empty-bootstrap"): {"review_id": key},
+            ("connection", selected.connection.id): conn,
+            ("binding", selected.binding.id): binding,
+        }
+        if any(values.get(k) != v for k, v in required.items()):
+            raise EmptyBootstrapError("controller-ledger-conflict")
+        if empty:
+            # Includes unknown history kinds, allocations, receipts and meta.
+            if values != required:
+                raise EmptyBootstrapError("foreign-controller-history")
+        else:
+            # Legitimately admitted membership/operation/record history is
+            # allowed, but additional connection or binding ownership is not.
+            static = {k: v for k, v in values.items()
+                      if k[0] in ("connection", "binding")}
+            wanted = {k: v for k, v in required.items()
+                      if k[0] in ("connection", "binding")}
+            if static != wanted:
+                raise EmptyBootstrapError("foreign-controller-ownership")
+
+
+def verify_runtime(root, state, reviewed, store):
+    """Rebind active shared runtime to the originally approved empty owner."""
+    if (reviewed.get("kind") != "empty-shared-dns-bootstrap"
+            or reviewed.get("legacy") != []):
+        raise EmptyBootstrapError("invalid-review")
+    key = state["review_id"]
+    data = _load_review(root, key)
+    if reviewed != data:
+        raise EmptyBootstrapError("review-mismatch")
+    marker = _read_file(root / "empty-bootstrap.json", None)
+    if (marker.get("review_id") != key or marker.get("stage") != "ledger-ready"
+            or marker.get("owner") != data["owner"]
+            or set(marker) != {"schema", "kind", "owner", "review_id",
+                               "stage", "ledger_identity"}):
+        raise EmptyBootstrapError("controller-state-conflict")
+    if marker["ledger_identity"] != _ledger_identity(store.path):
+        raise EmptyBootstrapError("ledger-file-identity-changed")
+    _static_ledger(store, key, data, empty=False)
+
+
+def _ledger(root, key, data, *, allow_create, empty=True):
     path = root / ("dns-ledger-" + key + ".sqlite3")
     if not path.exists() and not allow_create:
         raise EmptyBootstrapError("missing-controller-ledger")
-    store = SqliteStateStore(path, create=not path.exists())
-    selected = _selection_valid(data)
-    conn, binding = asdict(selected.connection), json.loads(json.dumps(asdict(selected.binding)))
-    with store.transaction():
-        meta = store.read("meta", "empty-bootstrap")
-        if meta is None:
-            if not allow_create or any(store.all(kind) for kind in (
+    if path.exists():
+        before = _ledger_identity(path)
+    else:
+        before = None
+    store = SqliteStateStore(path, create=before is None)
+    if before is None:
+        before = _ledger_identity(path)
+        # SqliteStateStore creates meta/schema in its initial transaction.
+        selected = _selection_valid(data)
+        with store.transaction():
+            if any(store.all(kind) for kind in (
                     "connection", "binding", "record", "operation", "reservation",
-                    "adoption", "membership-operation", "name-receipt")):
+                    "adoption", "membership-operation", "name-receipt",
+                    "allocation", "membership")):
                 raise EmptyBootstrapError("foreign-ledger")
-            if store.read("meta", "cutover") is not None:
-                raise EmptyBootstrapError("foreign-ledger")
-            store.write("connection", selected.connection.id, conn)
-            store.write("binding", selected.binding.id, binding)
+            store.write("connection", selected.connection.id, asdict(selected.connection))
+            store.write("binding", selected.binding.id,
+                        json.loads(json.dumps(asdict(selected.binding))))
             store.write("meta", "cutover", {"review_id": key})
             store.write("meta", "empty-bootstrap", {"review_id": key})
-        elif (meta != {"review_id": key}
-              or store.read("meta", "cutover") != {"review_id": key}
-              or store.read("connection", selected.connection.id) != conn
-              or store.read("binding", selected.binding.id) != binding
-              or any(store.all(k) for k in ("record", "operation", "reservation"))):
-            raise EmptyBootstrapError("controller-ledger-conflict")
+    _static_ledger(store, key, data, empty=empty)
+    if _ledger_identity(path) != before:
+        raise EmptyBootstrapError("ledger-file-identity-changed")
     return store
 
 
