@@ -108,10 +108,24 @@ class EmptySharedBootstrapTests(TestCase):
             self.assertEqual(store.all("record"), [])
             self.assertEqual(store.all("operation"), [])
             self.assertEqual(store.read("meta", "cutover"), {"review_id": proposal["review_id"]})
+        from zog.network_register.evidence import (
+            AuthorityEvidence, AuthoritativeAnswer,
+        )
+        class VerifiedCollector:
+            def authority(self, connection, binding):
+                now = time.time()
+                return AuthorityEvidence(
+                    connection.owner_id, connection.id, connection.revision,
+                    connection.credential_ref, binding.id, binding.revision,
+                    binding.zone_id, binding.zone_name, binding.prefix,
+                    binding.nameservers, now,
+                    tuple(AuthoritativeAnswer(ns, binding.zone_name, True, now, True)
+                          for ns in binding.nameservers),
+                )
         with controller_lock(config, modes=("shared",)) as root:
             self.assertEqual(root, self.root)
             selected, source, engine = dns_shared.open_runtime(
-                config, root, collector=None)
+                config, root, collector=VerifiedCollector())
             self.assertEqual(selected.host_ids, ())
             self.assertEqual(engine.store.path, store.path)
         self.assertEqual(bootstrap.inspect(owner=self.admin.pk,
