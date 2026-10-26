@@ -1,5 +1,8 @@
 """Source-only recovery tests; no provider writes or native authorization."""
 import json
+import os
+import time
+from unittest.mock import patch
 import tempfile
 from pathlib import Path
 
@@ -48,9 +51,12 @@ class LockAdoptionTests(TestCase):
 
     def test_replaced_lock_and_changed_evidence_block(self):
         candidate = adoption.review(owner=self.user.pk)
-        self.lock.unlink()
-        self.lock.write_bytes(b"")
-        self.lock.chmod(0o600)
+        original_inode = self.lock.stat().st_ino
+        replacement = self.root / "new-inode"
+        replacement.write_bytes(b"")
+        replacement.chmod(0o600)
+        self.assertNotEqual(original_inode, replacement.stat().st_ino)
+        os.replace(replacement, self.lock)
         with self.assertRaises(adoption.LockAdoptionError):
             adoption.commit(owner=self.user.pk, review_id=candidate["review_id"])
         self.assertFalse((self.root / "controller-lock-identity.json").exists())
@@ -64,6 +70,39 @@ class LockAdoptionTests(TestCase):
         self.lock.symlink_to(self.root / "foreign")
         with self.assertRaises(adoption.LockAdoptionError):
             adoption.review(owner=self.user.pk)
+
+    def test_expiry_refuses_first_commit_without_a_marker(self):
+        candidate = adoption.review(owner=self.user.pk)
+        with patch.object(adoption.time, "time", return_value=time.time() + 800):
+            with self.assertRaises(adoption.LockAdoptionError) as caught:
+                adoption.commit(owner=self.user.pk, review_id=candidate["review_id"])
+        self.assertEqual(caught.exception.code, "adoption-review-expired")
+        self.assertFalse((self.root / "controller-lock-identity.json").exists())
+
+    def test_crash_after_durable_marker_preserves_same_lock_and_replays(self):
+        candidate = adoption.review(owner=self.user.pk)
+        original = self.lock.stat()
+        with patch.object(adoption, "_fsync_dir",
+                          side_effect=OSError("simulated failure after marker write")):
+            with self.assertRaises(OSError):
+                adoption.commit(owner=self.user.pk, review_id=candidate["review_id"])
+        self.assertEqual(original.st_ino, self.lock.stat().st_ino)
+        self.assertTrue((self.root / "controller-lock-identity.json").exists())
+        with writer_lock(self.root):
+            pass
+        result = adoption.commit(owner=self.user.pk, review_id=candidate["review_id"])
+        self.assertTrue(result["replayed"])
+        self.assertEqual(adoption.inspect(owner=self.user.pk,
+                         review_id=candidate["review_id"])["adopted"], True)
+
+    def test_foreign_marker_binding_and_prior_review_evidence_refuse_repair(self):
+        prior = adoption.review(owner=self.user.pk)
+        candidate = adoption.review(owner=self.user.pk)
+        receipt = self.root / ("dns-review-" + prior["review_id"] + ".json")
+        receipt.write_text('{"tampered":true}')
+        with self.assertRaises(adoption.LockAdoptionError):
+            adoption.commit(owner=self.user.pk, review_id=candidate["review_id"])
+        self.assertFalse((self.root / "controller-lock-identity.json").exists())
 
     def test_approval_expiry_and_crash_marker_refuse_overwrite(self):
         candidate = adoption.review(owner=self.user.pk)
