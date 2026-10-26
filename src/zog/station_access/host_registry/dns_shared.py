@@ -17,6 +17,9 @@ def open_runtime(config, root, *, collector=None, provider_factory=None, pending
     store=SqliteStateStore(root/('dns-ledger-'+state['review_id']+'.sqlite3'))
     with store.transaction():
         if store.read('meta','cutover')!=dict(review_id=state['review_id']):raise NetworkError('storage')
+    if reviewed.get('kind') == 'empty-shared-dns-bootstrap':
+        from .dns_empty_bootstrap import verify_runtime
+        verify_runtime(root, state, reviewed, store)
     from .dns_membership import membership
     members=membership(store,reviewed)
     if members['pending'] and members['pending']!=pending_review:raise NetworkError('conflict')
