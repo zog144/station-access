@@ -163,6 +163,17 @@ class EmptySharedBootstrapTests(TestCase):
         self.assertFalse((self.root / "controller.json").exists())
         self.assertFalse((self.root / "network-register").exists())
 
+    def test_new_dns_ownership_after_review_blocks_before_publication(self):
+        proposal = self.review()
+        host = Host.objects.create(label="concurrent host")
+        DnsAssignment.objects.create(host=host, name="new.example.test",
+                                     owner_id="other-authority")
+        with self.assertRaises(bootstrap.EmptyBootstrapError) as result:
+            self.commit(proposal)
+        self.assertEqual(result.exception.code, "existing-dns-ownership")
+        self.assertFalse((self.root / "controller.json").exists())
+        self.assertFalse((self.root / "configuration.json").exists())
+
     def test_credential_revisions_and_zone_checks_repeat_at_commit(self):
         candidate = self.review()
         self.credential.revision = 3
