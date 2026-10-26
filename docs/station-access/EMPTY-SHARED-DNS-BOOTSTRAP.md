@@ -34,7 +34,7 @@ python manage.py bootstrap_empty_host_dns review \
   --prefix-label hosts
 ~~~
 
-The operation does read-only Cloudflare and DNS authority/inventory checks. It takes the same controller.lock as subsequent writers, saves a hash-bound ten-minute review with nonce, and returns the reviewed account/zone/prefix, owner, credential revision, digest and expiry plus provider_writes=0 and unknown write permission. No host, record, token or signed policy is created.
+The operation does read-only Cloudflare and DNS authority/inventory checks. The only initial lock provisioning is in this fresh protected bootstrap: it exclusively creates the mode-0600 controller.lock and durably binds its device/inode into controller-lock-identity.json. Subsequent bootstrap attempts and ordinary controller writers **must reopen exactly that inode** without recreating a missing or replaced pathname. Missing lock or identity, symlink, altered owner/mode, or inode drift is a blocking integrity fault requiring separate operator-reviewed recovery; existing legacy controllers need explicit protected lock adoption, never an implicit first-writer creation. It saves a hash-bound ten-minute review with nonce, and returns the reviewed account/zone/prefix, owner, credential revision, digest and expiry plus provider_writes=0 and unknown write permission. No host, record, token or signed policy is created.
 
 **The authorized operator must inspect and separately approve this exact review receipt** before:
 
@@ -46,7 +46,7 @@ python manage.py bootstrap_empty_host_dns commit \
 
 Commit repeats current owner, credential, Cloudflare zone/delegation and full record inventory checks. It creates a network-register schema-v1 SqliteStateStore with exactly the reviewed connection/binding and *empty* record/operation inventory. The durable config is mode 0600. Only after the ledger and audit are independently verified does controller.json become writer=shared, stage=active under the original single-writer lock. The DB keeps nonsecret review/zone security audit.
 
-A partial commit stays fenced. Before ledger creation the process saves a durable creating-ledger marker; if the database later cannot be found, **stop** rather than recreating it, even if the final config was not yet published. If a complete ledger exists and commit was interrupted, the exact same review may be independently revalidated and resumed. No generic reset, changed review ID, new cloud host or manually fabricated ledger is supported.
+A partial commit stays fenced. Before ledger creation the process saves a durable creating-ledger marker; if the database later cannot be found, **stop** rather than recreating it, even if the final config was not yet published. Before publishing writer=shared it attests the exact SQLite schema/meta, **one** reviewed connection, **one** reviewed binding and no additional record, operation, adoption, allocation, reservation, receipt, membership or unknown rows. The accepted ledger file is regular, non-symlink, service-owned, mode 0600; its device/inode identity is durably captured in the ledger-ready marker. If a complete ledger exists and commit was interrupted, the exact same review may be independently revalidated and resumed. On later shared-runtime reopen, original static ownership and file inode are verified while legitimate later membership history remains allowed. No generic reset, changed review ID, new cloud host or manually fabricated ledger is supported.
 
 Read back installed bytes without any provider call:
 
