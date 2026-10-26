@@ -330,13 +330,13 @@ class EmptySharedBootstrapTests(TestCase):
         proposal = self.review()
         self.commit(proposal)
         command = (
-            "import sys\\n"
-            "from zog.station_access.host_registry.dns_controller_lock import writer_lock\\n"
-            "from pathlib import Path\\n"
-            "root = Path(sys.argv[1])\\n"
-            "try:\\n"
-            "    with writer_lock(root): sys.exit(13)\\n"
-            "except BlockingIOError: sys.exit(0)\\n"
+            "import sys\n"
+            "from zog.station_access.host_registry.dns_controller_lock import writer_lock\n"
+            "from pathlib import Path\n"
+            "root = Path(sys.argv[1])\n"
+            "try:\n"
+            "    with writer_lock(root): sys.exit(13)\n"
+            "except BlockingIOError: sys.exit(0)\n"
         )
         with bootstrap._guard():
             child = subprocess.run(
