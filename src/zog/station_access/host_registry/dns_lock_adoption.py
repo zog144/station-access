@@ -141,8 +141,7 @@ def _snapshot(root, *, exclude=(), allow_marker=False):
             if value["kind"] == "empty-shared-dns-bootstrap":
                 bootstrap._load_review(root, match.group(1))
         entries.append(dict(name=path.name, **details))
-    if not entries or entries[0]["name"] != "controller.lock" and not any(
-            item["name"] == "controller.lock" for item in entries):
+    if not any(item["name"] == "controller.lock" for item in entries):
         raise LockAdoptionError("missing-original-lock")
     st = os.lstat(root)
     return dict(root=dict(device=st.st_dev, inode=st.st_ino),
@@ -241,10 +240,6 @@ def commit(*, owner, review_id):
             _write_identity(path, dict(**lock, adoption_review_id=review_id))
             _fsync_dir(root)
             _marker(root, review_id, lock)
-        _lock_same(root / "controller.lock",
-                   # Reopened *under the original flock* only for readback:
-                   # use writer_lock after release below instead.
-                   _open_existing_for_check(root), lock)
     with writer_lock(root):
         _marker(root, review_id, lock)
     with identity_locked():
@@ -258,12 +253,6 @@ def commit(*, owner, review_id):
     return dict(review_id=review_id, owner=owner, lock=lock,
                 adopted=True, replayed=exists, writer="uninitialized",
                 provider_writes=0)
-
-
-def _open_existing_for_check(root):
-    # This helper is not needed for ownership; _unbound_lock checks after yield.
-    # Avoid holding any new descriptor beyond the check.
-    return os.open(root / "controller.lock", os.O_RDONLY | os.O_NOFOLLOW)
 
 
 def inspect(*, owner, review_id):
