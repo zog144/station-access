@@ -76,16 +76,14 @@ def _directory(path, *, create=False):
 def _guard(*, create=False):
     root, config_path = _paths()
     _directory(root, create=create)
-    fd = os.open(root / "controller.lock",
-                 os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
-    try:
-        st = os.fstat(fd)
-        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid() or (st.st_mode & 0o077):
-            raise EmptyBootstrapError("unsafe-controller-lock")
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    from .dns_controller_lock import initialize_lock, writer_lock
+    if create and not root.joinpath("controller.lock").exists() and not (
+            root / "controller-lock-identity.json").exists():
+        # No automatic post-establishment lock recreation. A partially
+        # written identity is a permanent operator-inspection stop.
+        initialize_lock(root)
+    with writer_lock(root):
         yield root, config_path
-    finally:
-        os.close(fd)
 
 
 def _fresh_database():
