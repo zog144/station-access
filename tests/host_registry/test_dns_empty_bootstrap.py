@@ -395,6 +395,62 @@ class EmptySharedBootstrapTests(TestCase):
         with self.assertRaises((bootstrap.EmptyBootstrapError, NetworkError)):
             self.commit(proposal)
 
+    def test_active_runtime_rejects_foreign_static_ownership_but_keeps_history(self):
+        proposal = self.review()
+        self.commit(proposal)
+        config = json.loads((self.root / "configuration.json").read_text())
+        store = SqliteStateStore(self._ledger_path(proposal))
+        # Membership history is allowed after activation, never additional
+        # foreign connection/binding ownership.
+        with store.transaction():
+            store.write("meta", "membership-enabled", {"enabled": True})
+            store.write("meta", "membership",
+                        {"revision": 1, "host_ids": [], "pending": None})
+        from zog.network_register.evidence import (
+            AuthorityEvidence, AuthoritativeAnswer,
+        )
+        class Collector:
+            def authority(self, connection, binding):
+                now = time.time()
+                return AuthorityEvidence(
+                    connection.owner_id, connection.id, connection.revision,
+                    connection.credential_ref, binding.id, binding.revision,
+                    binding.zone_id, binding.zone_name, binding.prefix,
+                    binding.nameservers, now,
+                    tuple(AuthoritativeAnswer(ns, binding.zone_name, True, now, True)
+                          for ns in binding.nameservers),
+                )
+        with controller_lock(config, modes=("shared",)) as root:
+            selected, _, _ = dns_shared.open_runtime(config, root, collector=Collector())
+            self.assertEqual(selected.host_ids, ())
+        for kind in ("connection", "binding"):
+            with self.subTest(kind=kind):
+                with store.transaction():
+                    store.write(kind, "foreign-extra", {"foreign": True})
+                with controller_lock(config, modes=("shared",)) as root:
+                    with self.assertRaises((bootstrap.EmptyBootstrapError, NetworkError)):
+                        dns_shared.open_runtime(config, root, collector=Collector())
+                with store.transaction():
+                    store.delete(kind, "foreign-extra")
+
+    def test_crash_before_lock_identity_file_prevents_automatic_recreation(self):
+        from zog.station_access.host_registry import dns_controller_lock as lock
+        original_save = lock.save
+        def crash_before_authority(path, payload):
+            if path.name == "controller-lock-identity.json":
+                raise OSError("crash-after-lock-inode-before-identity")
+            return original_save(path, payload)
+        with patch.object(lock, "save", side_effect=crash_before_authority):
+            with self.assertRaises(OSError):
+                self.review()
+        lock_path = self.root / "controller.lock"
+        self.assertTrue(lock_path.exists())
+        inode = lock_path.stat().st_ino
+        with self.assertRaises(NetworkError):
+            self.review()
+        self.assertEqual(lock_path.stat().st_ino, inode)
+        self.assertFalse((self.root / "controller.json").exists())
+
     def test_crash_at_configuration_and_after_active_publication(self):
         proposal = self.review()
         original = bootstrap._exclusive_json
