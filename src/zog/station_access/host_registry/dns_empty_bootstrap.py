@@ -381,8 +381,9 @@ def commit(*, owner, review_id, collector=None, provider_factory=None):
                 raise EmptyBootstrapError("controller-state-unavailable") from None
             if (not isinstance(raw, dict) or
                     {k: raw.get(k) for k in marker} != marker or
-                    set(raw) != set(marker) | {"stage"} or
-                    raw["stage"] not in ("reserved", "creating-ledger", "ledger-ready")):
+                    raw.get("stage") not in ("reserved", "creating-ledger", "ledger-ready")
+                    or set(raw) != (set(marker) | {"stage"} |
+                                   ({"ledger_identity"} if raw.get("stage") == "ledger-ready" else set()))):
                 raise EmptyBootstrapError("controller-state-conflict")
             stage = raw["stage"]
         # Always recheck credential, active zone, delegation and complete
@@ -403,10 +404,20 @@ def commit(*, owner, review_id, collector=None, provider_factory=None):
             _directory(root / "network-register")
             _ledger(root, review_id, data, allow_create=True)
             stage = "ledger-ready"
-            save(marker_path, dict(marker, stage=stage))
+            save(marker_path, dict(marker, stage=stage,
+                                   ledger_identity=_ledger_identity(store_path)))
         else:
             _directory(root / "network-register")
-            _ledger(root, review_id, data, allow_create=False)
+            _ledger(root, review_id, data, allow_create=False,
+                    empty=not (root / "controller.json").exists())
+            if stage == "creating-ledger":
+                # Only a complete exact empty ledger may advance from the
+                # uncertain creating stage; retain the original inode.
+                stage = "ledger-ready"
+                save(marker_path, dict(marker, stage=stage,
+                                       ledger_identity=_ledger_identity(store_path)))
+            elif raw["ledger_identity"] != _ledger_identity(store_path):
+                raise EmptyBootstrapError("ledger-file-identity-changed")
         config = _config(data, root)
         _exclusive_json(config_path, config)
         ctrl = dict(schema=2, binding=legacy_binding(config), writer="shared",
@@ -444,10 +455,18 @@ def inspect(*, owner, review_id):
             raise EmptyBootstrapError("wrong-review-owner")
         marker = dict(schema=1, kind="empty-shared-dns-bootstrap",
                       review_id=review_id, owner=owner)
-        _read_file(root / "empty-bootstrap.json", dict(marker, stage="ledger-ready"))
+        state_marker = _read_file(root / "empty-bootstrap.json", None)
+        if (type(state_marker) is not dict
+                or set(state_marker) != set(marker) | {"stage", "ledger_identity"}
+                or any(state_marker.get(k) != v for k, v in marker.items())
+                or state_marker["stage"] != "ledger-ready"):
+            raise EmptyBootstrapError("controller-state-conflict")
         config = _config(data, root)
         _read_file(config_path, config)
-        _ledger(root, review_id, data, allow_create=False)
+        if state_marker["ledger_identity"] != _ledger_identity(
+                root / ("dns-ledger-" + review_id + ".sqlite3")):
+            raise EmptyBootstrapError("ledger-file-identity-changed")
+        _ledger(root, review_id, data, allow_create=False, empty=False)
         if controller_state(config) != dict(
                 schema=2, binding=legacy_binding(config),
                 writer="shared", review_id=review_id, stage="active"):
