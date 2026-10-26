@@ -333,6 +333,10 @@ def commit(*, owner, review_id, collector=None, provider_factory=None):
                     review_id=review_id, stage="active")
         with identity_locked():
             owner_authorized(owner)
+            # A second writer or an intervening name/record allocation must
+            # not turn a reviewed empty controller into a false empty owner.
+            if not (root / "controller.json").exists() and not _fresh_database():
+                raise EmptyBootstrapError("existing-dns-ownership")
             if not SecurityAudit.objects.filter(
                     action="dns-empty-bootstrap", details__review_id=review_id).exists():
                 SecurityAudit.objects.create(
