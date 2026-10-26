@@ -79,6 +79,10 @@ def _guard(*, create=False):
     from .dns_controller_lock import initialize_lock, writer_lock
     if create and not root.joinpath("controller.lock").exists() and not (
             root / "controller-lock-identity.json").exists():
+        # Initial provisioning is permitted only in a genuinely empty
+        # protected namespace. Do not write a new lock into foreign state.
+        if any(root.iterdir()):
+            raise EmptyBootstrapError("foreign-controller-state")
         # No automatic post-establishment lock recreation. A partially
         # written identity is a permanent operator-inspection stop.
         initialize_lock(root)
