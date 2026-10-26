@@ -104,6 +104,36 @@ class LockAdoptionTests(TestCase):
             adoption.commit(owner=self.user.pk, review_id=candidate["review_id"])
         self.assertFalse((self.root / "controller-lock-identity.json").exists())
 
+    def test_adopted_marker_must_be_complete_and_single_linked(self):
+        candidate = adoption.review(owner=self.user.pk)
+        adoption.commit(owner=self.user.pk, review_id=candidate["review_id"])
+        marker = self.root / "controller-lock-identity.json"
+        alias = self.root / "marker-second-link"
+        os.link(marker, alias)
+        with self.assertRaises(NetworkError):
+            with writer_lock(self.root):
+                pass
+        alias.unlink()
+        marker.write_bytes(marker.read_bytes() + b" " * 4096)
+        with self.assertRaises(NetworkError):
+            with writer_lock(self.root):
+                pass
+
+    def test_adopted_receipt_must_remain_exact_and_protected(self):
+        candidate = adoption.review(owner=self.user.pk)
+        adoption.commit(owner=self.user.pk, review_id=candidate["review_id"])
+        receipt = self.root / ("dns-review-" + candidate["review_id"] + ".json")
+        alias = self.root / "receipt-second-link"
+        os.link(receipt, alias)
+        with self.assertRaises(NetworkError):
+            with writer_lock(self.root):
+                pass
+        alias.unlink()
+        receipt.write_bytes(receipt.read_bytes() + b"\x20" * 65536)
+        with self.assertRaises(NetworkError):
+            with writer_lock(self.root):
+                pass
+
     def test_approval_expiry_and_crash_marker_refuse_overwrite(self):
         candidate = adoption.review(owner=self.user.pk)
         marker = self.root / "controller-lock-identity.json"
