@@ -435,12 +435,12 @@ class EmptySharedBootstrapTests(TestCase):
 
     def test_crash_before_lock_identity_file_prevents_automatic_recreation(self):
         from zog.station_access.host_registry import dns_controller_lock as lock
-        original_save = lock.save
+        original_writer = lock._write_identity
         def crash_before_authority(path, payload):
             if path.name == "controller-lock-identity.json":
                 raise OSError("crash-after-lock-inode-before-identity")
-            return original_save(path, payload)
-        with patch.object(lock, "save", side_effect=crash_before_authority):
+            return original_writer(path, payload)
+        with patch.object(lock, "_write_identity", side_effect=crash_before_authority):
             with self.assertRaises(OSError):
                 self.review()
         lock_path = self.root / "controller.lock"
