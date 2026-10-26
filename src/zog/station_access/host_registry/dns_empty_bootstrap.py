@@ -112,7 +112,7 @@ def _load_review(root, review_id):
     if type(review_id) is not str or not REVIEW_ID.fullmatch(review_id):
         raise EmptyBootstrapError("invalid-review")
     try:
-        data = json.loads((root / ("dns-review-" + review_id + ".json")).read_bytes())
+        data = _read_file(root / ("dns-review-" + review_id + ".json"), None)
     except (OSError, ValueError, UnicodeError):
         raise EmptyBootstrapError("review-unavailable") from None
     if (type(data) is not dict or digest(data) != review_id
@@ -213,8 +213,12 @@ def _read_file(path, expected):
             if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid() or (st.st_mode & 0o077):
                 raise EmptyBootstrapError("unsafe-controller-file")
             raw = os.read(fd, 65537)
-            if len(raw) > 65536 or json.loads(raw) != expected:
+            if len(raw) > 65536:
                 raise EmptyBootstrapError("controller-state-conflict")
+            value = json.loads(raw)
+            if expected is not None and value != expected:
+                raise EmptyBootstrapError("controller-state-conflict")
+            return value
         finally:
             os.close(fd)
     except (OSError, ValueError, UnicodeError):
@@ -296,7 +300,7 @@ def commit(*, owner, review_id, collector=None, provider_factory=None):
             stage = "reserved"
         else:
             try:
-                raw = json.loads(marker_path.read_bytes())
+                raw = _read_file(marker_path, None)
             except (OSError, ValueError, UnicodeError):
                 raise EmptyBootstrapError("controller-state-unavailable") from None
             if (not isinstance(raw, dict) or
