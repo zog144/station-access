@@ -96,7 +96,7 @@ def _fresh_database():
 
 
 def _allowed_files(root, *, committed=False):
-    allowed = {"controller.lock"}
+    allowed = {"controller.lock", "controller-lock-identity.json"}
     allowed.update(p.name for p in root.glob("dns-review-*.json"))
     if committed:
         allowed.update({"controller.json", "configuration.json", "empty-bootstrap.json",
