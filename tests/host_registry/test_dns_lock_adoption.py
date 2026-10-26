@@ -1,8 +1,5 @@
 """Source-only recovery tests; no provider writes or native authorization."""
 import json
-import os
-import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
@@ -46,16 +43,6 @@ class LockAdoptionTests(TestCase):
 
     def test_concurrent_writer_refuses_review(self):
         with writer_lock_unbound(self.root):
-            command = ("from zog.station_access.host_registry.dns_lock_adoption "
-                       "import review\n"
-                       "import sys\n"
-                       "try: review(owner=int(sys.argv[1]))\n"
-                       "except BlockingIOError: sys.exit(0)\n"
-                       "sys.exit(1)\n")
-            child = subprocess.run([sys.executable, "-c", command, str(self.user.pk)],
-                                   capture_output=True, text=True, timeout=8)
-            # The child may lack the test settings; this is not the native
-            # lock gate. The in-process gate below is authoritative.
             with self.assertRaises(BlockingIOError):
                 adoption.review(owner=self.user.pk)
 
