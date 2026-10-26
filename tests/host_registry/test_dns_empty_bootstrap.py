@@ -199,9 +199,8 @@ class EmptySharedBootstrapTests(TestCase):
             self.review()
         self.assertEqual((self.root / "unexpected-ledger").read_text(), "foreign")
 
-    def test_recovery_after_preparation_keeps_same_review(self):
+    def test_uncertain_ledger_creation_blocks_without_reinitializing(self):
         candidate = self.review()
-        original = bootstrap._ledger
         def fail(root, key, data, *, allow_create):
             raise OSError("simulated-crash-before-ledger")
         with patch.object(bootstrap, "_ledger", side_effect=fail):
@@ -209,6 +208,23 @@ class EmptySharedBootstrapTests(TestCase):
                 self.commit(candidate)
         self.assertTrue((self.root / "empty-bootstrap.json").exists())
         self.assertFalse((self.root / "controller.json").exists())
+        with self.assertRaises(bootstrap.EmptyBootstrapError) as error:
+            self.commit(candidate)
+        self.assertEqual(error.exception.code, "missing-controller-ledger")
+        self.assertFalse((self.root / ("dns-ledger-" + candidate["review_id"] + ".sqlite3")).exists())
+
+    def test_resume_after_ledger_commit_before_active_marker(self):
+        candidate = self.review()
+        original = bootstrap.save
+        def fail_after_ledger(path, value):
+            original(path, value)
+            if path.name == "empty-bootstrap.json" and value.get("stage") == "ledger-ready":
+                raise OSError("simulated-crash-after-ledger")
+        with patch.object(bootstrap, "save", side_effect=fail_after_ledger):
+            with self.assertRaises(OSError):
+                self.commit(candidate)
+        self.assertFalse((self.root / "controller.json").exists())
+        self.assertTrue((self.root / ("dns-ledger-" + candidate["review_id"] + ".sqlite3")).exists())
         result = self.commit(candidate)
         self.assertTrue(result["replayed"])
         self.assertEqual(bootstrap.inspect(owner=self.admin.pk,
