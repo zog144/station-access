@@ -468,6 +468,42 @@ class EmptySharedBootstrapTests(TestCase):
         self.assertEqual(bootstrap.inspect(owner=self.admin.pk,
                                            review_id=proposal["review_id"])["writer"], "shared")
 
+    def test_partial_ledger_inode_replacement_and_symlink_block_activation(self):
+        proposal = self.review()
+        self._ready_ledger_pending_activation(proposal)
+        path = self._ledger_path(proposal)
+        original = self.root / "original-prepare-ledger"
+        path.rename(original)
+        path.write_bytes(original.read_bytes())
+        path.chmod(0o600)
+        with self.assertRaises((bootstrap.EmptyBootstrapError, NetworkError)):
+            self.commit(proposal)
+        self.assertFalse((self.root / "controller.json").exists())
+        path.unlink()
+        path.symlink_to(original)
+        with self.assertRaises((bootstrap.EmptyBootstrapError, NetworkError)):
+            self.commit(proposal)
+        self.assertFalse((self.root / "controller.json").exists())
+
+    def test_crash_after_controller_publication_reopens_same_review(self):
+        proposal = self.review()
+        original = bootstrap._exclusive_json
+        def fail_after_controller(path, value):
+            result = original(path, value)
+            if path.name == "controller.json":
+                raise OSError("crash-after-controller-published")
+            return result
+        with patch.object(bootstrap, "_exclusive_json", side_effect=fail_after_controller):
+            with self.assertRaises(OSError):
+                self.commit(proposal)
+        inode = self._ledger_path(proposal).stat().st_ino
+        result = self.commit(proposal)
+        self.assertTrue(result["replayed"])
+        self.assertEqual(inode, self._ledger_path(proposal).stat().st_ino)
+        self.assertEqual(SecurityAudit.objects.filter(action="dns-empty-bootstrap").count(), 1)
+        self.assertEqual(bootstrap.inspect(
+            owner=self.admin.pk, review_id=proposal["review_id"])["writer"], "shared")
+
     def test_cli_never_leaks_provider_body_on_failures(self):
         with self.assertRaises(CommandError) as e:
             call_command("bootstrap_empty_host_dns", "commit",
