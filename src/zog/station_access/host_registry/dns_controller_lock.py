@@ -11,7 +11,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from zog.network_register.contracts import NetworkError
-from zog.network_register.state import save
+
 
 
 def _details(fd):
@@ -63,6 +63,20 @@ def _directory(root):
         raise NetworkError("storage")
 
 
+def _write_identity(path, identity):
+    """Exclusively create durable immutable lock identity; never overwrite."""
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    except FileExistsError:
+        raise NetworkError("storage") from None
+    try:
+        raw = json.dumps(dict(schema=1, **identity), sort_keys=True).encode() + b"\\n"
+        os.write(fd, raw)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 def initialize_lock(root):
     """Explicit initial provisioning only, under a protected directory.
 
@@ -71,7 +85,8 @@ def initialize_lock(root):
     """
     root = Path(root)
     _directory(root)
-    if (root / "controller.lock").exists() or (root / "controller-lock-identity.json").exists():
+    if any((root / name).exists() or (root / name).is_symlink()
+           for name in ("controller.lock", "controller-lock-identity.json")):
         raise NetworkError("conflict")
     try:
         fd = os.open(root / "controller.lock",
@@ -79,7 +94,7 @@ def initialize_lock(root):
         try:
             identity = _details(fd)
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            save(root / "controller-lock-identity.json", dict(schema=1, **identity))
+            _write_identity(root / "controller-lock-identity.json", identity)
             _matches(root / "controller.lock", fd, identity)
         finally:
             os.close(fd)
