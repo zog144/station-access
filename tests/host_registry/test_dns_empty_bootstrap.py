@@ -5,6 +5,8 @@ installed-byte acceptance remain separate.
 """
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -262,6 +264,153 @@ class EmptySharedBootstrapTests(TestCase):
         with controller_lock(config, modes=("shared",)):
             with self.assertRaises(BlockingIOError):
                 self.commit(candidate)
+
+    def _ledger_path(self, candidate):
+        return self.root / ("dns-ledger-" + candidate["review_id"] + ".sqlite3")
+
+    def _ready_ledger_pending_activation(self, candidate):
+        original = bootstrap._exclusive_json
+        def fail_config(path, value):
+            if path.name == "configuration.json":
+                raise OSError("simulated-crash-before-config")
+            return original(path, value)
+        with patch.object(bootstrap, "_exclusive_json", side_effect=fail_config):
+            with self.assertRaises(OSError):
+                self.commit(candidate)
+        self.assertTrue(self._ledger_path(candidate).exists())
+        self.assertFalse((self.root / "controller.json").exists())
+
+    def test_stable_lock_fails_closed_after_unlink_replacement(self):
+        proposal = self.review()
+        self.commit(proposal)
+        config = json.loads((self.root / "configuration.json").read_text())
+        path = self.root / "controller.lock"
+        original_inode = path.stat().st_ino
+        with self.assertRaises(NetworkError):
+            with controller_lock(config, modes=("shared",)):
+                path.unlink()
+                path.write_text("replacement")
+                path.chmod(0o600)
+                self.assertNotEqual(original_inode, path.stat().st_ino)
+                # A new worker must refuse the replacement pathname,
+                # even while the original inode remains locked.
+                with self.assertRaises(NetworkError):
+                    with controller_lock(config, modes=("shared",)):
+                        pass
+        with self.assertRaises(NetworkError):
+            self.commit(proposal)
+        self.assertFalse((self.root / "controller.lock").is_symlink())
+
+    def test_lost_symlinked_and_unsafe_lock_refuse_new_writer(self):
+        proposal = self.review()
+        self.commit(proposal)
+        config = json.loads((self.root / "configuration.json").read_text())
+        path = self.root / "controller.lock"
+        path.chmod(0o644)
+        with self.assertRaises(NetworkError):
+            with controller_lock(config, modes=("shared",)):
+                pass
+        path.chmod(0o600)
+        path.unlink()
+        with self.assertRaises(NetworkError):
+            with controller_lock(config, modes=("shared",)):
+                pass
+        with self.assertRaises(NetworkError):
+            self.commit(proposal)
+        other = self.root / "other.lock"
+        other.write_text("foreign")
+        other.chmod(0o600)
+        path.symlink_to(other)
+        with self.assertRaises((NetworkError, OSError)):
+            with controller_lock(config, modes=("shared",)):
+                pass
+        self.assertTrue(path.is_symlink())
+
+    def test_second_process_cannot_enter_live_shared_writer(self):
+        proposal = self.review()
+        self.commit(proposal)
+        command = (
+            "import sys; "
+            "from zog.station_access.host_registry.dns_controller_lock import writer_lock; "
+            "from pathlib import Path; "
+            "root = Path(sys.argv[1]); "
+            "try:\\n"
+            " with writer_lock(root): sys.exit(13)\\n"
+            "except BlockingIOError: sys.exit(0)\\n"
+        ).replace("\\\\n", "\\n")
+        with bootstrap._guard():
+            child = subprocess.run(
+                [sys.executable, "-c", command, str(self.root)],
+                capture_output=True, text=True, timeout=8)
+            self.assertEqual(child.returncode, 0, child.stderr)
+        # A restarted fresh process can reopen exactly the same lock.
+        child = subprocess.run(
+            [sys.executable, "-c", command.replace("sys.exit(13)", "sys.exit(0)"),
+             str(self.root)], capture_output=True, text=True, timeout=8)
+        self.assertEqual(child.returncode, 0, child.stderr)
+
+    def test_empty_ledger_rejects_every_foreign_kind_and_duplicate_owner(self):
+        proposal = self.review()
+        self._ready_ledger_pending_activation(proposal)
+        path = self._ledger_path(proposal)
+        store = SqliteStateStore(path)
+        unexpected = [
+            ("connection", "extra"), ("binding", "extra"),
+            ("meta", "foreign"), ("record", "extra"), ("operation", "extra"),
+            ("reservation", "extra"), ("allocation", "extra"),
+            ("adoption", "extra"), ("membership-operation", "extra"),
+            ("name-receipt", "extra"), ("membership", "extra"),
+            ("unreviewed-history", "extra"),
+        ]
+        for kind, key in unexpected:
+            with self.subTest(kind=kind):
+                with store.transaction():
+                    store.write(kind, key, {"unapproved": True})
+                with self.assertRaises((bootstrap.EmptyBootstrapError, NetworkError)):
+                    self.commit(proposal)
+                self.assertFalse((self.root / "controller.json").exists())
+                with store.transaction():
+                    store.delete(kind, key)
+        self.assertEqual(self.commit(proposal)["writer"], "shared")
+
+    def test_replaced_ledger_inode_and_symlink_block_inspect_and_runtime(self):
+        proposal = self.review()
+        self.commit(proposal)
+        config = json.loads((self.root / "configuration.json").read_text())
+        ledger = self._ledger_path(proposal)
+        original = self.root / "saved-original-ledger"
+        ledger.rename(original)
+        ledger.write_bytes(original.read_bytes())
+        ledger.chmod(0o600)
+        self.assertNotEqual(ledger.stat().st_ino, original.stat().st_ino)
+        with self.assertRaises((bootstrap.EmptyBootstrapError, NetworkError)):
+            bootstrap.inspect(owner=self.admin.pk, review_id=proposal["review_id"])
+        with controller_lock(config, modes=("shared",)) as root:
+            with self.assertRaises((bootstrap.EmptyBootstrapError, NetworkError)):
+                dns_shared.open_runtime(config, root)
+        ledger.unlink()
+        ledger.symlink_to(original)
+        with self.assertRaises((bootstrap.EmptyBootstrapError, NetworkError)):
+            bootstrap.inspect(owner=self.admin.pk, review_id=proposal["review_id"])
+        with self.assertRaises((bootstrap.EmptyBootstrapError, NetworkError)):
+            self.commit(proposal)
+
+    def test_crash_at_configuration_and_after_active_publication(self):
+        proposal = self.review()
+        original = bootstrap._exclusive_json
+        def fail_after_config(path, value):
+            result = original(path, value)
+            if path.name == "configuration.json":
+                raise OSError("crash-after-config")
+            return result
+        with patch.object(bootstrap, "_exclusive_json", side_effect=fail_after_config):
+            with self.assertRaises(OSError):
+                self.commit(proposal)
+        saved_inode = self._ledger_path(proposal).stat().st_ino
+        self.assertEqual(self.commit(proposal)["writer"], "shared")
+        self.assertEqual(self._ledger_path(proposal).stat().st_ino, saved_inode)
+        self.assertEqual(bootstrap.inspect(owner=self.admin.pk,
+                                           review_id=proposal["review_id"])["writer"], "shared")
 
     def test_cli_never_leaks_provider_body_on_failures(self):
         with self.assertRaises(CommandError) as e:
