@@ -251,23 +251,72 @@ def _exclusive_json(path, value):
         raise
 
 
-def _ledger_identity(path):
-    """Attest the real immutable SQLite file identity, not merely its name."""
+def _ledger_identity(path, *, expected=None):
+    """Check the *existing* SQLite inode before the generic store can open it.
+
+    The directory is service-owned 0700 and callers hold controller.lock.
+    Refuse symlinks, hardlinks, wrong UID/mode, path swaps, and a different
+    saved inode. This check never invokes SQLite and never creates a file.
+    """
+    path = Path(path)
+    _directory(path.parent)
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
         try:
             st = os.fstat(fd)
             current = os.stat(path, follow_symlinks=False)
             if (not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid()
-                    or st.st_mode & 0o077
+                    or stat.S_IMODE(st.st_mode) != 0o600 or st.st_nlink != 1
                     or not stat.S_ISREG(current.st_mode)
+                    or current.st_uid != st.st_uid
+                    or stat.S_IMODE(current.st_mode) != 0o600
+                    or current.st_nlink != 1
                     or (st.st_dev, st.st_ino) != (current.st_dev, current.st_ino)):
                 raise EmptyBootstrapError("unsafe-controller-ledger")
-            return dict(device=st.st_dev, inode=st.st_ino)
+            identity = dict(device=st.st_dev, inode=st.st_ino)
+            if expected is not None and (type(expected) is not dict
+                    or set(expected) != {"device", "inode"}
+                    or identity != expected):
+                raise EmptyBootstrapError("ledger-file-identity-changed")
+            # Recheck the path while our O_NOFOLLOW descriptor is still open.
+            again = os.stat(path, follow_symlinks=False)
+            if (not stat.S_ISREG(again.st_mode)
+                    or (again.st_dev, again.st_ino) !=
+                       (st.st_dev, st.st_ino)):
+                raise EmptyBootstrapError("ledger-file-identity-changed")
+            return identity
         finally:
             os.close(fd)
     except OSError:
         raise EmptyBootstrapError("missing-or-unsafe-controller-ledger") from None
+
+
+def _ready_ledger_identity(root, state, reviewed):
+    """Authenticate saved bootstrap review and marker *without* opening SQLite."""
+    if (reviewed.get("kind") != "empty-shared-dns-bootstrap"
+            or reviewed.get("legacy") != []):
+        raise EmptyBootstrapError("invalid-review")
+    key = state["review_id"]
+    data = _load_review(root, key)
+    if reviewed != data:
+        raise EmptyBootstrapError("review-mismatch")
+    marker = _read_file(root / "empty-bootstrap.json", None)
+    if (type(marker) is not dict or marker.get("schema") != 1
+            or marker.get("kind") != "empty-shared-dns-bootstrap"
+            or marker.get("review_id") != key or marker.get("stage") != "ledger-ready"
+            or marker.get("owner") != data["owner"]
+            or set(marker) != {"schema", "kind", "owner", "review_id",
+                               "stage", "ledger_identity"}):
+        raise EmptyBootstrapError("controller-state-conflict")
+    return marker["ledger_identity"]
+
+
+def preopen_runtime_ledger(root, state, reviewed):
+    """Reject foreign ledger inode before SqliteStateStore/__init__/connect."""
+    expected = _ready_ledger_identity(root, state, reviewed)
+    _ledger_identity(root / ("dns-ledger-" + state["review_id"] + ".sqlite3"),
+                     expected=expected)
+    return expected
 
 
 def _static_ledger(store, key, data, *, empty):
@@ -309,38 +358,26 @@ def _static_ledger(store, key, data, *, empty):
 
 
 def verify_runtime(root, state, reviewed, store):
-    """Rebind active shared runtime to the originally approved empty owner."""
-    if (reviewed.get("kind") != "empty-shared-dns-bootstrap"
-            or reviewed.get("legacy") != []):
-        raise EmptyBootstrapError("invalid-review")
-    key = state["review_id"]
-    data = _load_review(root, key)
-    if reviewed != data:
-        raise EmptyBootstrapError("review-mismatch")
-    marker = _read_file(root / "empty-bootstrap.json", None)
-    if (type(marker) is not dict or marker.get("schema") != 1
-            or marker.get("kind") != "empty-shared-dns-bootstrap"
-            or marker.get("review_id") != key or marker.get("stage") != "ledger-ready"
-            or marker.get("owner") != data["owner"]
-            or set(marker) != {"schema", "kind", "owner", "review_id",
-                               "stage", "ledger_identity"}):
-        raise EmptyBootstrapError("controller-state-conflict")
-    if marker["ledger_identity"] != _ledger_identity(store.path):
-        raise EmptyBootstrapError("ledger-file-identity-changed")
-    _static_ledger(store, key, data, empty=False)
-    if marker["ledger_identity"] != _ledger_identity(store.path):
-        raise EmptyBootstrapError("ledger-file-identity-changed")
+    """Recheck the original SQLite identity and static owner after readback."""
+    expected = _ready_ledger_identity(root, state, reviewed)
+    _ledger_identity(store.path, expected=expected)
+    data = _load_review(root, state["review_id"])
+    _static_ledger(store, state["review_id"], data, empty=False)
+    _ledger_identity(store.path, expected=expected)
 
 
-def _ledger(root, key, data, *, allow_create, empty=True):
+def _ledger(root, key, data, *, allow_create, empty=True, expected_identity=None):
     path = root / ("dns-ledger-" + key + ".sqlite3")
     if not path.exists() and not allow_create:
         raise EmptyBootstrapError("missing-controller-ledger")
-    if path.exists():
-        before = _ledger_identity(path)
+    if path.exists() or path.is_symlink():
+        before = _ledger_identity(path, expected=expected_identity)
     else:
         before = None
+    # Refusal above occurs before the first transaction or sqlite3.connect.
     store = SqliteStateStore(path, create=before is None)
+    if before is not None:
+        _ledger_identity(path, expected=before)
     if before is None:
         before = _ledger_identity(path)
         # SqliteStateStore creates meta/schema in its initial transaction.
@@ -417,7 +454,9 @@ def commit(*, owner, review_id, collector=None, provider_factory=None):
         else:
             _directory(root / "network-register")
             _ledger(root, review_id, data, allow_create=False,
-                    empty=not (root / "controller.json").exists())
+                    empty=not (root / "controller.json").exists(),
+                    expected_identity=(raw["ledger_identity"]
+                                       if stage == "ledger-ready" else None))
             if stage == "creating-ledger":
                 # Only a complete exact empty ledger may advance from the
                 # uncertain creating stage; retain the original inode.
@@ -474,7 +513,8 @@ def inspect(*, owner, review_id):
         if state_marker["ledger_identity"] != _ledger_identity(
                 root / ("dns-ledger-" + review_id + ".sqlite3")):
             raise EmptyBootstrapError("ledger-file-identity-changed")
-        _ledger(root, review_id, data, allow_create=False, empty=False)
+        _ledger(root, review_id, data, allow_create=False, empty=False,
+                expected_identity=state_marker["ledger_identity"])
         if controller_state(config) != dict(
                 schema=2, binding=legacy_binding(config),
                 writer="shared", review_id=review_id, stage="active"):
