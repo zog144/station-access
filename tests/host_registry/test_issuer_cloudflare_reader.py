@@ -6,6 +6,7 @@ import socket
 import stat
 import struct
 import tempfile
+import time
 import uuid
 from datetime import timedelta
 from pathlib import Path
@@ -21,7 +22,8 @@ from zog.station_access.host_registry.issuer_cloudflare_reader import (
 )
 from zog.station_access.host_registry.models import (
     CertificateAssignment, DnsDestination, ProviderCredential,
-    ProviderAccessCheck, SecurityAudit, IssuerTokenReadNonce
+    ProviderAccessCheck, SecurityAudit, IssuerTokenReadNonce, Host,
+    HostIdentity, ManagedAdmission, ManagedDns01Hostname
 )
 
 TOKEN = "CF_TokenFixture23456789001234567890"
@@ -220,6 +222,110 @@ class CloudflareReaderTests(TestCase):
         good=Connection(0,payload)
         serve_once(Listener(good))
         self.assertEqual(good.sent,TOKEN.encode())
+
+    def _managed_dns01(self):
+        """Real reviewed name authority, not a DnsDestination or A record."""
+        host = Host.objects.create(label="generic issuer", provider="generic")
+        fingerprint = "f" * 64
+        HostIdentity.objects.create(
+            host=host, fingerprint=fingerprint, public_key="A" * 44,
+            status="approved", approved_at=timezone.now(), approved_by="reader-admin")
+        admission = ManagedAdmission.objects.create(
+            host=host, fingerprint=fingerprint,
+            installation_id=uuid.uuid4(), state_volume_id=uuid.uuid4(),
+            authority_id=uuid.uuid4(), registry_id="test-registry",
+            epoch=1, checkpoint=uuid.uuid4(), request={},
+            claims={"jti": "live-issuer-session", "exp": time.time() + 3600})
+        hostname = "issuer.example.org"
+        grant = ManagedDns01Hostname.objects.create(
+            host=host, hostname=hostname, fingerprint=fingerprint,
+            installation_id=admission.installation_id,
+            state_volume_id=admission.state_volume_id,
+            authority_id=admission.authority_id,
+            registry_id=admission.registry_id,
+            credential=self.credential, credential_revision=4,
+            zone_id="zone1", zone_name="example.org",
+            owner_user_id=self.admin.pk, review_id="f" * 64)
+        policy = dict(self.assignment.statement["policy"], hostnames=[hostname])
+        self.assignment.origin = "managed"
+        self.assignment.host = host
+        self.assignment.installation_id = admission.installation_id
+        self.assignment.hostname = hostname
+        self.assignment.binding_id = "managed-dns01"
+        self.assignment.statement = {
+            **self.assignment.statement, "policy": policy,
+            "origin": "managed", "host_id": str(host.pk),
+            "installation_id": str(admission.installation_id),
+            "binding_id": "managed-dns01", "host_fingerprint": fingerprint}
+        self.assignment.save()
+        self.a["policy_sha256"] = hashlib.sha256(canonical(policy)).hexdigest()
+        self.projection["origin"] = "managed"
+        self.projection["host_id"] = str(host.pk)
+        self.projection["installation_id"] = str(admission.installation_id)
+        self.binding.delete()
+        return host, admission, grant
+
+    def test_managed_dns01_approved_name_returns_token_without_legacy_destination(self):
+        host, admission, grant = self._managed_dns01()
+        self.assertFalse(DnsDestination.objects.exists())
+        self.assertFalse(host.additional_dns_assignments.exists())
+        self.assertEqual(read_approved_token(self.request()), TOKEN.encode())
+        self.assertEqual(IssuerTokenReadNonce.objects.count(), 1)
+        self.assertEqual(ManagedDns01Hostname.objects.get(host=host).pk, host.pk)
+
+    def test_managed_dns01_rejects_changed_authority_before_decrypt(self):
+        host, admission, grant = self._managed_dns01()
+        from django.db import transaction
+        def changed_grant():
+            ManagedDns01Hostname.objects.filter(host=host).update(active=False)
+        def changed_zone():
+            ManagedDns01Hostname.objects.filter(host=host).update(zone_id="foreign-zone")
+        def changed_owner():
+            ManagedDns01Hostname.objects.filter(host=host).update(owner_user_id=self.admin.pk + 1)
+        def changed_credential():
+            ManagedDns01Hostname.objects.filter(host=host).update(credential_revision=9)
+        def changed_installation():
+            ManagedAdmission.objects.filter(host=host).update(installation_id=uuid.uuid4())
+        def changed_state():
+            ManagedAdmission.objects.filter(host=host).update(state_volume_id=uuid.uuid4())
+        def changed_authority():
+            ManagedAdmission.objects.filter(host=host).update(authority_id=uuid.uuid4())
+        def changed_registry():
+            ManagedAdmission.objects.filter(host=host).update(registry_id="different")
+        def expired_session():
+            ManagedAdmission.objects.filter(host=host).update(
+                claims={"jti": "live-issuer-session", "exp": 0})
+        def revoked_key():
+            HostIdentity.objects.filter(host=host).update(status="revoked")
+        def wrong_host_mode():
+            Host.objects.filter(pk=host.pk).update(provider="aws")
+        def wrong_signed_binding():
+            CertificateAssignment.objects.filter(pk=self.assignment.pk).update(
+                statement=dict(self.assignment.statement, binding_id="legacy-destination"))
+        def wrong_signed_fingerprint():
+            CertificateAssignment.objects.filter(pk=self.assignment.pk).update(
+                statement=dict(self.assignment.statement, host_fingerprint="0"*64))
+        for change in (
+                changed_grant, changed_zone, changed_owner, changed_credential,
+                changed_installation, changed_state, changed_authority,
+                changed_registry, expired_session, revoked_key, wrong_host_mode,
+                wrong_signed_binding, wrong_signed_fingerprint):
+            with self.subTest(change=change.__name__), transaction.atomic():
+                change()
+                with patch("zog.station_access.host_registry.issuer_cloudflare_reader.decrypt_provider",
+                           side_effect=AssertionError("must refuse before decryption")):
+                    self.denied()
+                transaction.set_rollback(True)
+
+    def test_managed_dns01_cannot_be_used_by_local_or_legacy_assignment(self):
+        self._managed_dns01()
+        from django.db import transaction
+        for field, val in (("origin", "local"), ("binding_id", "unreviewed")):
+            with self.subTest(field=field), transaction.atomic():
+                CertificateAssignment.objects.filter(pk=self.assignment.pk).update(**{field: val})
+                self.denied()
+                transaction.set_rollback(True)
+        self.assertFalse(DnsDestination.objects.exists())
 
     def test_no_token_or_provider_text_in_exception(self):
         with patch("zog.station_access.host_registry.issuer_cloudflare_reader.decrypt_provider",
