@@ -66,6 +66,10 @@ Only after successful native controller verification, the unchanged generic Host
 
 A hostname name grant is **not** a signed certificate assignment, DNS TXT/A record, Cloudflare token transfer, Certbot grant or permission to issue a certificate. Global signer activation, selected runtime, credential delivery, ACME, nginx and reboot remain separate acceptance gates.
 
+## Protected pre-open ledger verification
+
+Before any SQLite database connection during shared runtime, status or recovery, the station verifies the ledger file through an O_NOFOLLOW descriptor. It requires a single-linked regular file, service UID and mode 0600, matching pathname/device/inode, and the durable identity when available. An invalid path blocks without opening SQLite. Checks repeat after database readback. The service-owned protected directory and exclusive controller lock are required; native acceptance must verify exclusive service access and demonstrate that ledger substitution cannot be performed by another running process.
+
 ## Mandatory refusal conditions
 
 - Existing controller/config/legacy assignment/ledger or double writer: **STOP**, never adopt, migrate or overwrite through this path.
