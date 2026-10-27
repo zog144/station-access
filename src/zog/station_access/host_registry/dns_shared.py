@@ -14,11 +14,21 @@ def open_runtime(config, root, *, collector=None, provider_factory=None, pending
     state=controller_state(config)
     if state['writer'] not in ('shared','paused'):raise NetworkError('permission')
     reviewed=load_review(root,state['review_id'])
-    store=SqliteStateStore(root/('dns-ledger-'+state['review_id']+'.sqlite3'))
+    path=root/('dns-ledger-'+state['review_id']+'.sqlite3')
+    protected=reviewed.get('kind') == 'empty-shared-dns-bootstrap'
+    if protected:
+        from .dns_empty_bootstrap import (
+            _ledger_identity, preopen_runtime_ledger, verify_runtime,
+        )
+        expected=preopen_runtime_ledger(root, state, reviewed)
+    # Never instantiate SqliteStateStore before its protected file precheck:
+    # its constructor performs the first writable sqlite3.connect.
+    store=SqliteStateStore(path)
+    if protected:
+        _ledger_identity(path, expected=expected)
     with store.transaction():
         if store.read('meta','cutover')!=dict(review_id=state['review_id']):raise NetworkError('storage')
-    if reviewed.get('kind') == 'empty-shared-dns-bootstrap':
-        from .dns_empty_bootstrap import verify_runtime
+    if protected:
         verify_runtime(root, state, reviewed, store)
     from .dns_membership import membership
     members=membership(store,reviewed)
@@ -132,7 +142,18 @@ def status(config):
         reviewed=load_review(root,state['review_id']);owner_authorized(reviewed['selection']['owner_user_id'])
         result=dict(state,records=[e['item'] for e in reviewed['legacy']],operations=[])
         if state['stage'] in ('importing','adopted','active'):
-            store=SqliteStateStore(root/('dns-ledger-'+state['review_id']+'.sqlite3'))
+            path=root/('dns-ledger-'+state['review_id']+'.sqlite3')
+            if reviewed.get('kind') == 'empty-shared-dns-bootstrap':
+                from .dns_empty_bootstrap import (
+                    _ledger_identity, preopen_runtime_ledger, verify_runtime,
+                )
+                expected=preopen_runtime_ledger(root, state, reviewed)
+            else:
+                expected=None
+            store=SqliteStateStore(path)
+            if expected is not None:
+                _ledger_identity(path, expected=expected)
+                verify_runtime(root, state, reviewed, store)
             from .dns_membership import membership
             result['membership']=membership(store,reviewed)
             with store.transaction():
