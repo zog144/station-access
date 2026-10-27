@@ -176,12 +176,12 @@ def _assignment(projection):
                 or not ManagedAdmission.objects.filter(
                     host=host, installation_id=row.installation_id).exists()):
             _deny()
-    if (row.statement.get("binding_id") != row.binding_id
-            or row.statement.get("origin") != row.origin
-            or row.statement.get("installation_id") != str(row.installation_id)
-            or row.statement.get("host_id") != projection["host_id"]):
-        _deny()
     if row.binding_id == "managed-dns01":
+        if (row.statement.get("binding_id") != row.binding_id
+                or row.statement.get("origin") != row.origin
+                or row.statement.get("installation_id") != str(row.installation_id)
+                or row.statement.get("host_id") != projection["host_id"]):
+            _deny()
         # Preserve the true certificate-only name authority: no A/AAAA
         # publication, DnsDestination or fabricated AWS identity is needed.
         if row.origin != "managed" or row.host is None:
