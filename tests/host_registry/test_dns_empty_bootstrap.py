@@ -395,6 +395,108 @@ class EmptySharedBootstrapTests(TestCase):
         with self.assertRaises((bootstrap.EmptyBootstrapError, NetworkError)):
             self.commit(proposal)
 
+    def _assert_no_sqlite_open_for_foreign_ledger(self, proposal):
+        """A later identity rejection is too late: assert zero connect calls."""
+        config = json.loads((self.root / "configuration.json").read_text())
+        with controller_lock(config, modes=("shared",)) as root:
+            with patch("zog.network_register.store.sqlite3.connect",
+                       side_effect=AssertionError("foreign-sqlite-open")) as connect:
+                with self.assertRaises(bootstrap.EmptyBootstrapError):
+                    dns_shared.open_runtime(config, root)
+                connect.assert_not_called()
+
+    def test_symlink_ledger_is_refused_before_sqlite_connect(self):
+        proposal = self.review()
+        self.commit(proposal)
+        ledger = self._ledger_path(proposal)
+        preserved = self.root / "original-ledger"
+        ledger.rename(preserved)
+        original_bytes = preserved.read_bytes()
+        ledger.symlink_to(preserved)
+        self._assert_no_sqlite_open_for_foreign_ledger(proposal)
+        self.assertEqual(preserved.read_bytes(), original_bytes)
+        self.assertTrue(ledger.is_symlink())
+
+    def test_hardlinked_ledger_is_refused_before_sqlite_connect(self):
+        proposal = self.review()
+        self.commit(proposal)
+        ledger = self._ledger_path(proposal)
+        hardlink = self.root / "ledger-hardlink"
+        original_bytes = ledger.read_bytes()
+        os.link(ledger, hardlink)
+        self.assertEqual(ledger.stat().st_nlink, 2)
+        self._assert_no_sqlite_open_for_foreign_ledger(proposal)
+        self.assertEqual(ledger.read_bytes(), original_bytes)
+        hardlink.unlink()
+        config = json.loads((self.root / "configuration.json").read_text())
+        with controller_lock(config, modes=("shared",)) as root:
+            # Correct original inode is still eligible after the foreign
+            # hardlink is removed; this does not recreate the SQLite file.
+            from zog.network_register.evidence import AuthorityEvidence, AuthoritativeAnswer
+            class Collector:
+                def authority(self, connection, binding):
+                    now = time.time()
+                    return AuthorityEvidence(
+                        connection.owner_id, connection.id, connection.revision,
+                        connection.credential_ref, binding.id, binding.revision,
+                        binding.zone_id, binding.zone_name, binding.prefix,
+                        binding.nameservers, now,
+                        tuple(AuthoritativeAnswer(ns, binding.zone_name, True, now, True)
+                              for ns in binding.nameservers))
+            dns_shared.open_runtime(config, root, collector=Collector())
+
+    def test_replaced_ledger_is_refused_before_sqlite_connect(self):
+        proposal = self.review()
+        self.commit(proposal)
+        ledger = self._ledger_path(proposal)
+        original_bytes = ledger.read_bytes()
+        original_inode = ledger.stat().st_ino
+        replacement = self.root / "prepared-foreign-ledger"
+        replacement.write_bytes(original_bytes)
+        replacement.chmod(0o600)
+        self.assertNotEqual(original_inode, replacement.stat().st_ino)
+        preserved = self.root / "preserved-ledger"
+        ledger.rename(preserved)
+        os.replace(replacement, ledger)
+        self.assertNotEqual(original_inode, ledger.stat().st_ino)
+        self._assert_no_sqlite_open_for_foreign_ledger(proposal)
+        self.assertEqual(ledger.read_bytes(), original_bytes)
+        self.assertEqual(preserved.read_bytes(), original_bytes)
+
+    def test_recovery_refuses_hardlinked_prepared_ledger_before_sqlite_open(self):
+        proposal = self.review()
+        self._ready_ledger_pending_activation(proposal)
+        ledger = self._ledger_path(proposal)
+        hardlink = self.root / "partial-ledger-hardlink"
+        os.link(ledger, hardlink)
+        data = bootstrap._load_review(self.root, proposal["review_id"])
+        marker = bootstrap._read_file(self.root / "empty-bootstrap.json", None)
+        self.assertEqual(marker["stage"], "ledger-ready")
+        with patch("zog.network_register.store.sqlite3.connect",
+                   side_effect=AssertionError("foreign-sqlite-open")) as connect:
+            with self.assertRaises(bootstrap.EmptyBootstrapError):
+                bootstrap._ledger(self.root, proposal["review_id"], data,
+                                  allow_create=False, expected_identity=marker["ledger_identity"])
+            connect.assert_not_called()
+        self.assertFalse((self.root / "controller.json").exists())
+
+    def test_status_rejects_replaced_ledger_before_sqlite_connect(self):
+        proposal = self.review()
+        self.commit(proposal)
+        ledger = self._ledger_path(proposal)
+        replacement = self.root / "status-replacement"
+        replacement.write_bytes(ledger.read_bytes())
+        replacement.chmod(0o600)
+        preserved = self.root / "status-original"
+        ledger.rename(preserved)
+        os.replace(replacement, ledger)
+        config = json.loads((self.root / "configuration.json").read_text())
+        with patch("zog.network_register.store.sqlite3.connect",
+                   side_effect=AssertionError("foreign-sqlite-open")) as connect:
+            with self.assertRaises(bootstrap.EmptyBootstrapError):
+                dns_shared.status(config)
+            connect.assert_not_called()
+
     def test_active_runtime_rejects_foreign_static_ownership_but_keeps_history(self):
         proposal = self.review()
         self.commit(proposal)
