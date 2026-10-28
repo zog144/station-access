@@ -337,3 +337,56 @@ class CloudflareReaderTests(TestCase):
                 self.assertNotIn("SENSITIVE",str(exc))
             else:
                 self.fail("Must deny vault failure")
+
+
+
+class CloudflareListenerIdentityTests(TestCase):
+    """Real Linux AF_UNIX descriptors differ from their bound path inode."""
+
+    def test_exact_bound_listener_is_accepted_without_inode_equivalence(self):
+        from zog.station_access.host_registry.issuer_cloudflare_reader import _verify_listener_socket
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "reader.sock"
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+                listener.bind(str(path))
+                path.chmod(0o600)
+                listener.listen(1)
+                fd_info = os.fstat(listener.fileno())
+                name_info = path.lstat()
+                self.assertTrue(stat.S_ISSOCK(fd_info.st_mode))
+                self.assertTrue(stat.S_ISSOCK(name_info.st_mode))
+                self.assertNotEqual((fd_info.st_dev, fd_info.st_ino),
+                                    (name_info.st_dev, name_info.st_ino))
+                self.assertIs(
+                    _verify_listener_socket(listener, str(path), os.geteuid()),
+                    listener)
+
+                for invalid_path in (str(path) + ".other", "/run/not-this-reader.sock"):
+                    with self.subTest(path=invalid_path):
+                        with self.assertRaises(ReaderDenied):
+                            _verify_listener_socket(listener, invalid_path, os.geteuid())
+                with self.assertRaises(ReaderDenied):
+                    _verify_listener_socket(listener, str(path), os.geteuid() + 1)
+                path.chmod(0o666)
+                with self.assertRaises(ReaderDenied):
+                    _verify_listener_socket(listener, str(path), os.geteuid())
+                path.chmod(0o600)
+                path.unlink()
+                path.symlink_to(Path(directory) / "substitute")
+                with self.assertRaises(ReaderDenied):
+                    _verify_listener_socket(listener, str(path), os.geteuid())
+
+    def test_unlistened_and_non_unix_descriptors_are_rejected(self):
+        from zog.station_access.host_registry.issuer_cloudflare_reader import _verify_listener_socket
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "reader.sock"
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as unlistened:
+                unlistened.bind(str(path))
+                path.chmod(0o600)
+                with self.assertRaises(ReaderDenied):
+                    _verify_listener_socket(unlistened, str(path), os.geteuid())
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tcp:
+                with self.assertRaises(ReaderDenied):
+                    _verify_listener_socket(tcp, str(path), os.geteuid())
