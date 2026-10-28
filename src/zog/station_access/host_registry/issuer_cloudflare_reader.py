@@ -284,6 +284,30 @@ def read_approved_token(request):
         _deny()
 
 
+def _verify_listener_socket(listener, expected, required_uid):
+    """Check the kernel listener and pathname independently, never by inode equality.
+
+    An AF_UNIX fd's sockfs inode and a bound socket pathname's filesystem
+    inode are separate objects on Linux. Both still require trusted identity.
+    """
+    try:
+        if (listener.family != socket.AF_UNIX
+                or listener.getsockopt(socket.SOL_SOCKET, socket.SO_TYPE) != socket.SOCK_STREAM
+                or listener.getsockopt(socket.SOL_SOCKET, socket.SO_ACCEPTCONN) != 1
+                or listener.getsockname() != expected):
+            _deny()
+        path_info = Path(expected).lstat()
+        fd_info = os.fstat(listener.fileno())
+        if (not stat.S_ISSOCK(fd_info.st_mode)
+                or not stat.S_ISSOCK(path_info.st_mode)
+                or path_info.st_uid != required_uid
+                or stat.S_IMODE(path_info.st_mode) != 0o600):
+            _deny()
+    except (OSError, ValueError, TypeError):
+        _deny()
+    return listener
+
+
 def _listener():
     expected = getattr(settings, "HOST_ISSUER_CREDENTIAL_SOCKET_PATH", "")
     required_uid = getattr(settings, "HOST_ISSUER_CREDENTIAL_READER_UID", None)
@@ -292,23 +316,13 @@ def _listener():
             or required_uid <= 0 or os.geteuid() != required_uid):
         _deny()
     listener = socket.socket(fileno=3)
-    if (listener.family != socket.AF_UNIX or
-            listener.getsockopt(socket.SOL_SOCKET,socket.SO_TYPE) != socket.SOCK_STREAM
-            or listener.getsockname() != expected):
-        _deny()
     location = Path(expected)
     for parent in reversed(location.parents):
         info = parent.lstat()
         if (not stat.S_ISDIR(info.st_mode) or info.st_mode & 0o022
                 or info.st_uid not in (0, required_uid)):
             _deny()
-    info = location.lstat()
-    live = os.fstat(listener.fileno())
-    if (not stat.S_ISSOCK(info.st_mode)
-            or (info.st_dev,info.st_ino) != (live.st_dev,live.st_ino)
-            or info.st_uid != required_uid or stat.S_IMODE(info.st_mode)!=0o600):
-        _deny()
-    return listener
+    return _verify_listener_socket(listener, expected, required_uid)
 
 
 def serve_once(listener):
