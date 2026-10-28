@@ -148,8 +148,9 @@ def _assignment(projection):
         _deny()
     if hashlib.sha256(canonical(row.receipt)).hexdigest() != a["receipt_sha256"]:
         _deny()
-    # The same administrator must own the reviewed DNS destination and the
-    # original signed certificate-intent approval. Audit is nonsecret.
+    # The original signing administrator must still own the exact reviewed
+    # DNS authority. A managed-dns01 name grant is *not* a DnsDestination or
+    # an A record and must never be represented as either. Audit is nonsecret.
     accepted = SecurityAudit.objects.filter(
         action="certificate-assign", actor=str(projection["owner_user_id"]),
         details__assignment_id=str(row.pk)).exists()
@@ -175,28 +176,49 @@ def _assignment(projection):
                 or not ManagedAdmission.objects.filter(
                     host=host, installation_id=row.installation_id).exists()):
             _deny()
-    binding = DnsDestination.objects.filter(pk=row.binding_id, enabled=True).first()
-    if binding is None or not isinstance(binding.selection, dict):
-        _deny()
-    selected = binding.selection
-    if (selected.get("owner_user_id") != projection["owner_user_id"]
-            or selected.get("credential_id") != str(credential.pk)
-            or selected.get("credential_revision") != credential.revision
-            or selected.get("zone_id") != a["zone_id"]
-            or selected.get("zone_name") != a["zone_name"]):
-        _deny()
-    if row.origin == "managed":
-        record = AdditionalDnsAssignment.objects.filter(
-            host=row.host,binding=binding,phase="ready",name=row.hostname,
-            enabled=True,status="synchronized").first()
-        if (record is None or record.applied_revision != record.revision
-                or not record.record_id):
+    if row.binding_id == "managed-dns01":
+        if (row.statement.get("binding_id") != row.binding_id
+                or row.statement.get("origin") != row.origin
+                or row.statement.get("installation_id") != str(row.installation_id)
+                or row.statement.get("host_id") != projection["host_id"]):
             _deny()
+        # Preserve the true certificate-only name authority: no A/AAAA
+        # publication, DnsDestination or fabricated AWS identity is needed.
+        if row.origin != "managed" or row.host is None:
+            _deny()
+        from .managed_dns01_hostname import selected as dns01_selected
+        approved_credential = dns01_selected(
+            row.host, row.hostname, str(credential.pk), credential.revision,
+            a["zone_id"], a["zone_name"], projection["owner_user_id"])
+        if (approved_credential is None or
+                approved_credential.pk != credential.pk):
+            _deny()
+        # This is the *exact* hostname granted to this host, not a
+        # domain-wide or issuer-service-level credential release.
     else:
-        prefix = selected.get("prefix")
-        if (not isinstance(prefix,str) or row.hostname.count(".") != prefix.count(".")+1
-                or not row.hostname.endswith("." + prefix)):
+        binding = DnsDestination.objects.filter(pk=row.binding_id, enabled=True).first()
+        if binding is None or not isinstance(binding.selection, dict):
             _deny()
+        selected = binding.selection
+        if (selected.get("owner_user_id") != projection["owner_user_id"]
+                or selected.get("credential_id") != str(credential.pk)
+                or selected.get("credential_revision") != credential.revision
+                or selected.get("zone_id") != a["zone_id"]
+                or selected.get("zone_name") != a["zone_name"]):
+            _deny()
+        if row.origin == "managed":
+            record = AdditionalDnsAssignment.objects.filter(
+                host=row.host, binding=binding, phase="ready", name=row.hostname,
+                enabled=True, status="synchronized").first()
+            if (record is None or record.applied_revision != record.revision
+                    or not record.record_id):
+                _deny()
+        else:
+            prefix = selected.get("prefix")
+            if (not isinstance(prefix, str)
+                    or row.hostname.count(".") != prefix.count(".") + 1
+                    or not row.hostname.endswith("." + prefix)):
+                _deny()
     check = serialize(credential)
     if (check["status"] != "passed" or not check["fresh"]
             or not any(d.get("id")==a["zone_id"] and
@@ -262,6 +284,30 @@ def read_approved_token(request):
         _deny()
 
 
+def _verify_listener_socket(listener, expected, required_uid):
+    """Check the kernel listener and pathname independently, never by inode equality.
+
+    An AF_UNIX fd's sockfs inode and a bound socket pathname's filesystem
+    inode are separate objects on Linux. Both still require trusted identity.
+    """
+    try:
+        if (listener.family != socket.AF_UNIX
+                or listener.getsockopt(socket.SOL_SOCKET, socket.SO_TYPE) != socket.SOCK_STREAM
+                or listener.getsockopt(socket.SOL_SOCKET, socket.SO_ACCEPTCONN) != 1
+                or listener.getsockname() != expected):
+            _deny()
+        path_info = Path(expected).lstat()
+        fd_info = os.fstat(listener.fileno())
+        if (not stat.S_ISSOCK(fd_info.st_mode)
+                or not stat.S_ISSOCK(path_info.st_mode)
+                or path_info.st_uid != required_uid
+                or stat.S_IMODE(path_info.st_mode) != 0o600):
+            _deny()
+    except (OSError, ValueError, TypeError):
+        _deny()
+    return listener
+
+
 def _listener():
     expected = getattr(settings, "HOST_ISSUER_CREDENTIAL_SOCKET_PATH", "")
     required_uid = getattr(settings, "HOST_ISSUER_CREDENTIAL_READER_UID", None)
@@ -270,23 +316,13 @@ def _listener():
             or required_uid <= 0 or os.geteuid() != required_uid):
         _deny()
     listener = socket.socket(fileno=3)
-    if (listener.family != socket.AF_UNIX or
-            listener.getsockopt(socket.SOL_SOCKET,socket.SO_TYPE) != socket.SOCK_STREAM
-            or listener.getsockname() != expected):
-        _deny()
     location = Path(expected)
     for parent in reversed(location.parents):
         info = parent.lstat()
         if (not stat.S_ISDIR(info.st_mode) or info.st_mode & 0o022
                 or info.st_uid not in (0, required_uid)):
             _deny()
-    info = location.lstat()
-    live = os.fstat(listener.fileno())
-    if (not stat.S_ISSOCK(info.st_mode)
-            or (info.st_dev,info.st_ino) != (live.st_dev,live.st_ino)
-            or info.st_uid != required_uid or stat.S_IMODE(info.st_mode)!=0o600):
-        _deny()
-    return listener
+    return _verify_listener_socket(listener, expected, required_uid)
 
 
 def serve_once(listener):

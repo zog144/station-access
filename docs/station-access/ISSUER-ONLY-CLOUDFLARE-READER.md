@@ -129,6 +129,12 @@ token**. Root/host-deploy must separately review a zone-limited
 issuer-specific token and enforce revision/permission freshness just
 before any selected issue/renew. No \`certify-policy\` mount is made writable.
 
+## Managed DNS-01 hostname authority (no A-record dependency)
+
+A managed Host with `CertificateAssignment.binding_id="managed-dns01"` uses the genuine, separately reviewed active `ManagedDns01Hostname` grant rather than a legacy `DnsDestination` or `AdditionalDnsAssignment`. The reader verifies the signed assignment's exact binding, origin, Host UUID, installation UUID, fingerprint, approved HostIdentity, unexpired managed admission/session, STATE/authority/registry continuity, hostname, operator owner, credential UUID/revision and Cloudflare zone ID/name. The original protected root authorization, policy and receipt digests, local projection, nonce/UID gates and fresh Cloudflare access check remain mandatory, before and after decrypt.
+
+This grants read access to **one** approved issuer credential for a **separately signed** DNS-01 certificate assignment; it never claims an A record, invents AWS identity or allows browser/host-discover callers to retrieve a token. Legacy destinations retain their exact synchronized-record checks. The existing root-control local socket bridge is same-host only. Distinct-station/consumer transport requires the separately reviewed [protected cross-host credential transport contract](ISSUER-CROSS-HOST-CREDENTIAL-TRANSPORT.md), and is **not implemented or natively authorized** by this reader change.
+
 ## Operation and acceptance
 
 For the isolated, reviewed station vault service (not the station web
