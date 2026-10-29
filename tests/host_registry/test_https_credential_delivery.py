@@ -183,7 +183,7 @@ class BrokerTests(TestCase):
         claims.pop("consumer_signature_ed25519")
         data["consumer_signature_ed25519"]=base64.b64encode(
             self.consumer_key.sign(
-                b"zog-credential-delivery-consumer-v1\\0" + canonical(claims))).decode()
+                b"zog-credential-delivery-consumer-v1\0" + canonical(claims))).decode()
         value=canonical(data)
         signed=signatures.sign(ORIGIN+PATH,value,key or self.key,H)
         return envelope(value, {h:signed.headers[h] for h in HEADERS}).rstrip(b"\\n")
