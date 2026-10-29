@@ -211,6 +211,23 @@ class BrokerTests(TestCase):
                 authority._consume(self.grant,dict(data,nonce="b"*32),
                     self.fp,"signed-four",timezone.now()+timedelta(seconds=120))
 
+    def test_signed_revocation_tombstone_blocks_old_grant_after_reboot(self):
+        revoked=dict(self.grant, state="revoked", revision=3)
+        with patch.object(authority.os, "geteuid", return_value=0), \
+             patch.object(authority, "_authority", return_value=revoked):
+            result=authority.reconcile_signed_revocation()
+        self.assertEqual(result["status"],"revoked")
+        history=HttpsCredentialDeliveryRevision.objects.get(host_id=H)
+        self.assertTrue(history.revoked)
+        self.assertEqual(history.grant_revision,3)
+        # An operator cannot revive the old approved revision by restoring
+        # the old root-owned file, even after the service restarts.
+        with patch.object(authority, "_current"), \
+             patch.object(authority, "_projection", return_value={}):
+            with self.assertRaises(DeliveryDenied):
+                authority._consume(self.grant,parse(request()),self.fp,
+                    "signed-reboot",timezone.now()+timedelta(seconds=120))
+
     def test_independent_operator_signature_accepts_exact_grant_only(self):
         import base64, hashlib
         from cryptography.hazmat.primitives import serialization
