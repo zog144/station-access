@@ -98,7 +98,8 @@ class ProtocolTests(SimpleTestCase):
         base = dict(REQUEST_METHOD="POST", PATH_INFO=PATH, QUERY_STRING="",
                     CONTENT_TYPE="application/json", CONTENT_LENGTH=str(len(request())),
                     **{"wsgi.input":BytesIO(request()), "wsgi.url_scheme":"https"})
-        with patch.object(credential_https_ingress, "relay",
+        with patch.dict(os.environ, {"ZOG_CREDENTIAL_HTTPS_INGRESS_ENABLED":"1"}), \
+             patch.object(credential_https_ingress, "relay",
                           side_effect=AssertionError("broker invoked")):
             for extra in ({"PATH_INFO":"/api/hosts/"}, {"HTTP_COOKIE":"sessionid=bad"},
                           {"REQUEST_METHOD":"GET"}, {"QUERY_STRING":"debug=1"}):
