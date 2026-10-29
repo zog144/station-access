@@ -189,7 +189,7 @@ def _verify_consumer(grant, data):
         claims = dict(data)
         claims.pop("consumer_signature_ed25519")
         Ed25519PublicKey.from_public_bytes(public).verify(
-            signature, b"zog-credential-delivery-consumer-v1\\0" + canonical(claims))
+            signature, b"zog-credential-delivery-consumer-v1\0" + canonical(claims))
     except (ValueError, TypeError, InvalidSignature, binascii.Error, KeyError):
         deny()
 
