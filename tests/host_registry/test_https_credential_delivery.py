@@ -1,0 +1,192 @@
+"""HTTPS credential producer source acceptance. No real Cloudflare token."""
+import json
+import os
+import time
+import uuid
+from datetime import timedelta
+from unittest.mock import patch
+
+from django.test import TestCase, SimpleTestCase, override_settings
+from django.utils import timezone
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from zog.host_identify import signatures
+from zog.station_access.credential_delivery_protocol import (
+    SCHEMA, PURPOSE, PATH, HEADERS, parse, envelope, unpack,
+    DeliveryDenied,
+)
+from zog.station_access import credential_https_ingress
+from zog.station_access.host_registry import credential_https_authority as authority
+from zog.station_access.host_registry import administrator_credential_profile as admin
+from zog.station_access.host_registry.models import (
+    Host, HostIdentity, SecurityGate, HttpsCredentialDeliveryNonce,
+    HttpsCredentialDeliveryRevision,
+)
+
+ORIGIN = "https://command-center.example.test"
+H = "00000000-0000-4000-8000-000000000111"
+I = "00000000-0000-4000-8000-000000000112"
+S = "00000000-0000-4000-8000-000000000113"
+A = "00000000-0000-4000-8000-000000000114"
+AUTH = "a"*64
+
+
+def request(**changes):
+    payload = dict(schema=SCHEMA, purpose=PURPOSE,
+        host_id=H, installation_id=I, state_volume_id=S,
+        registry_id="command-center", consumer="certify-manage",
+        destination="issuer-dns-cloudflare", authorization_id=AUTH,
+        assignment_id=A, assignment_revision=3,
+        credential_revision=4, nonce="e"*32)
+    payload.update(changes)
+    return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+
+
+def proposal(**changes):
+    value = dict(schema=admin.SCHEMA, purpose=admin.PURPOSE,
+        operation="first-provision", host_id=H, installation_id=I,
+        state_volume_id=S, account="station-admin", credential_revision=4,
+        operator_approval_sha256="a"*64,
+        destination="protected-station-admin-state",
+        source_kind="first-login-verified-export",
+        source_password_verified=True, receiver_grant_id="f"*32,
+        account_revision=3, session_revocation_required=True)
+    value.update(changes)
+    return value
+
+
+class ProtocolTests(SimpleTestCase):
+    def test_strict_cloudflare_only_request_and_envelope(self):
+        raw = request()
+        headers = {k: "test" for k in HEADERS}
+        headers["Content-Type"] = "application/json"
+        self.assertEqual(parse(raw)["purpose"], PURPOSE)
+        body, head, value = unpack(envelope(raw, headers).rstrip(b"\n"))
+        self.assertEqual((body, value["host_id"]), (raw, H))
+
+    def test_other_purposes_and_expanded_requests_never_admit(self):
+        for change in (
+            {"purpose":"station-administrator-bootstrap"},
+            {"purpose":"archive-mirror"},
+            {"destination":"anywhere"},
+            {"consumer":"browser"},
+            {"host_id":"not-uuid"},
+            {"credential_revision":True},
+            {"nonce":"x"*32},
+            {"remote_path":"/secrets"},
+        ):
+            with self.subTest(change=change), self.assertRaises(DeliveryDenied):
+                parse(request(**change))
+        for bad in (b'{"schema":"x","schema":"y"}', b'{"a":NaN}',
+                    b" "*2049, b"", b"\xff"):
+            with self.assertRaises(DeliveryDenied):
+                parse(bad)
+        headers = {k:"x" for k in HEADERS}
+        headers["Content-Type"] = "application/json"
+        headers["Signature"] = "evil\r\nX-Injected: yes"
+        with self.assertRaises(DeliveryDenied):
+            envelope(request(), headers)
+
+    def test_ordinary_wsgi_routes_and_browser_sessions_never_touch_broker(self):
+        from io import BytesIO
+        statuses = []
+        base = dict(REQUEST_METHOD="POST", PATH_INFO=PATH, QUERY_STRING="",
+                    CONTENT_TYPE="application/json", CONTENT_LENGTH=str(len(request())),
+                    **{"wsgi.input":BytesIO(request()), "wsgi.url_scheme":"https"})
+        with patch.object(credential_https_ingress, "relay",
+                          side_effect=AssertionError("broker invoked")):
+            for extra in ({"PATH_INFO":"/api/hosts/"}, {"HTTP_COOKIE":"sessionid=bad"},
+                          {"REQUEST_METHOD":"GET"}, {"QUERY_STRING":"debug=1"}):
+                environment = dict(base, **extra)
+                self.assertEqual(b"".join(credential_https_ingress.application(
+                    environment, lambda s,h: statuses.append(s))), b"")
+                self.assertEqual(statuses[-1], "403 Forbidden")
+
+    def test_admin_provisioning_requires_separate_approval_and_is_disabled(self):
+        valid = admin.validate_proposal(proposal())
+        self.assertFalse(valid["remote_delivery_authorized"])
+        for diff in ({"account":"other-admin"}, {"source_kind":"django-password-hash"},
+                     {"source_password_verified":False}, {"destination":"browser"},
+                     {"operator_approval_sha256":"0"}, {"credential_revision":0},
+                     {"installation_id":S}, {"session_revocation_required":False},
+                     {"purpose":"archive-mirror"}, {"password":"plaintext"}):
+            with self.subTest(diff=diff), self.assertRaises(DeliveryDenied):
+                admin.validate_proposal(proposal(**diff))
+
+
+@override_settings(HOST_IDENTITY_ORIGIN=ORIGIN, HOST_HTTPS_CREDENTIAL_LIVE_ENABLED=True)
+class BrokerTests(TestCase):
+    def setUp(self):
+        SecurityGate.objects.get_or_create(pk=1)
+        self.key=Ed25519PrivateKey.generate()
+        self.fp=signatures.fingerprint(self.key.public_key())
+        self.host=Host.objects.create(id=uuid.UUID(H), label="issuer", provider="generic")
+        HostIdentity.objects.create(host=self.host, fingerprint=self.fp,
+            public_key=signatures.public_text(self.key.public_key()),
+            status="approved", approved_by="test", approved_at=timezone.now())
+        self.grant=dict(
+            schema=authority.GRANT_SCHEMA, state="approved", purpose=PURPOSE,
+            consumer="certify-manage", destination="issuer-dns-cloudflare",
+            host_id=H, fingerprint=self.fp, installation_id=I,
+            state_volume_id=S, registry_id="command-center", authority_id=I,
+            assignment_id=A, assignment_revision=3, credential_revision=4,
+            authorization_id=AUTH, grant_id="a"*32, storage_id="b"*32,
+            operator_approval_sha256="b"*64,
+            independent_signer_pin_sha256="c"*64, revision=2,
+            expires_at=int(time.time())+3600)
+        self.headers = dict(signatures.sign(ORIGIN+PATH,request(),self.key,H).headers)
+
+    def _signed(self, body=None, key=None):
+        value=body or request()
+        signed=signatures.sign(ORIGIN+PATH,value,key or self.key,H)
+        return envelope(value, {h:signed.headers[h] for h in HEADERS}).rstrip(b"\n")
+
+    def test_disabled_root_broker_never_queries_vault(self):
+        with override_settings(HOST_HTTPS_CREDENTIAL_LIVE_ENABLED=False):
+            with patch.object(authority, "_read_local_token",
+                              side_effect=AssertionError("vault reached")):
+                with self.assertRaises(DeliveryDenied):
+                    authority.authorize_and_read(self._signed())
+
+    def test_signed_approved_host_and_broker_policy_only(self):
+        with patch.object(authority.os,"geteuid",return_value=0), \
+             patch.object(authority,"_authority",return_value=self.grant), \
+             patch.object(authority,"_consume",return_value="digest") as consume, \
+             patch.object(authority,"_read_local_token",return_value=b"CF_FAKE_TEST_TOKEN_1234567890"), \
+             patch.object(authority,"_current") as current, \
+             patch.object(authority,"_projection",return_value={}):
+            result=authority.authorize_and_read(self._signed())
+            self.assertEqual(result,b"CF_FAKE_TEST_TOKEN_1234567890")
+            consume.assert_called_once()
+            current.assert_called_once()
+            bad_key=Ed25519PrivateKey.generate()
+            with self.assertRaises(Exception):
+                authority.authorize_and_read(self._signed(key=bad_key))
+
+    def test_durable_nonce_grant_revision_and_replay(self):
+        data=parse(request())
+        with patch.object(authority,"_current"), patch.object(
+                authority,"_projection",return_value={}):
+            authority._consume(self.grant,data,self.fp,"signed-once",
+                               timezone.now()+timedelta(seconds=120))
+            self.assertEqual(HttpsCredentialDeliveryNonce.objects.count(),1)
+            self.assertEqual(HttpsCredentialDeliveryRevision.objects.count(),1)
+            with self.assertRaises(DeliveryDenied):
+                authority._consume(self.grant,data,self.fp,"signed-twice",
+                                   timezone.now()+timedelta(seconds=120))
+            self.assertEqual(HttpsCredentialDeliveryNonce.objects.count(),1)
+            rotated=dict(self.grant,revision=3,credential_revision=5)
+            changed=dict(data,credential_revision=5,nonce="d"*32)
+            authority._consume(rotated,changed,self.fp,"signed-three",
+                               timezone.now()+timedelta(seconds=120))
+            self.assertEqual(HttpsCredentialDeliveryRevision.objects.get(
+                host_id=H).credential_revision,5)
+            with self.assertRaises(DeliveryDenied):
+                authority._consume(self.grant,dict(data,nonce="b"*32),
+                    self.fp,"signed-four",timezone.now()+timedelta(seconds=120))
+
+    def test_root_operator_approval_not_self_issued(self):
+        with patch.object(authority,"_json_root",return_value=self.grant), \
+             patch.object(authority,"_independent_approval",
+                          side_effect=DeliveryDenied("not independently signed")):
+            with self.assertRaises(DeliveryDenied):
+                authority._authority()
