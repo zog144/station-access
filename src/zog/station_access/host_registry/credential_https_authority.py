@@ -111,7 +111,7 @@ def _independent_approval(grant):
         if len(pin) != 32:
             deny()
         Ed25519PublicKey.from_public_bytes(pin).verify(
-            sig, b"zog-credential-delivery-operator-approval-v1\\0"
+            sig, b"zog-credential-delivery-operator-approval-v1\0"
                  + canonical(packet))
         if hashlib.sha256(canonical(approval)).hexdigest() != grant["operator_approval_sha256"]:
             deny()
