@@ -21,6 +21,7 @@ class Migration(migrations.Migration):
                 ("host_id", models.UUIDField(primary_key=True, serialize=False)),
                 ("grant_revision", models.PositiveBigIntegerField()),
                 ("grant_sha256", models.CharField(max_length=64)),
+                ("revoked", models.BooleanField(default=False)),
                 ("credential_revision", models.PositiveBigIntegerField()),
                 ("updated_at", models.DateTimeField(auto_now=True)),
             ],
