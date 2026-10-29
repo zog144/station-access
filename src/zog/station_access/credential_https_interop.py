@@ -7,6 +7,7 @@ All returned ledgers must be committed durably under the original root-owned
 Station SecurityGate before the corresponding external action.
 """
 from zog.host_identify import credential_delivery as cd
+from zog.host_identify import signatures
 
 PURPOSE = "issuer-cloudflare-dns01"
 CONSUMER = "certify-manage"
@@ -38,9 +39,9 @@ def authorization_signed(value, key, *, expected_issuer, expected_binding, now):
 
 
 def request_admit(url, method, headers, body, host_key, authorization, ledger, *,
-                  now=None):
+                  expected_origin, now=None):
     """Caller must separately atomically persist signature nonce and ledger."""
-    if method != "POST" or not url.endswith(PATH):
+    if method != "POST" or url != signatures.origin(expected_origin) + PATH:
         raise InteropDenied("wrong-request-route")
     _restrict(authorization)
     request, nonce, expiry = cd.verify_request_http(
@@ -64,8 +65,8 @@ def delivery_record(ledger, value, request, authorization, authority_key, *,
 
 
 def receipt_record(url, method, headers, body, host_key,
-                   request, delivery_metadata, ledger, *, now=None):
-    if method != "POST" or not url.endswith(RECEIPT_PATH):
+                   request, delivery_metadata, ledger, *, expected_origin, now=None):
+    if method != "POST" or url != signatures.origin(expected_origin) + RECEIPT_PATH:
         raise InteropDenied("wrong-receipt-route")
     receipt, nonce, expiry = cd.verify_receipt_http(
         url, method, headers, body, host_key, request, delivery_metadata, now=now)
@@ -74,8 +75,8 @@ def receipt_record(url, method, headers, body, host_key,
 
 
 def cancel_record(url, method, headers, body, host_key, request, ledger, *,
-                  now=None):
-    if method != "POST" or not url.endswith(CANCEL_PATH):
+                  expected_origin, now=None):
+    if method != "POST" or url != signatures.origin(expected_origin) + CANCEL_PATH:
         raise InteropDenied("wrong-cancel-route")
     cancelled, nonce, expiry = cd.verify_cancel_http(
         url, method, headers, body, host_key, request, now=now)
