@@ -195,7 +195,7 @@ class BrokerTests(TestCase):
             "schema": "zog-credential-delivery-operator-approval-v1",
             "grant_sha256": hashlib.sha256(canonical(packet)).hexdigest(),
             "signature_ed25519": base64.b64encode(
-                key.sign(b"zog-credential-delivery-operator-approval-v1\\0"
+                key.sign(b"zog-credential-delivery-operator-approval-v1\0"
                          + canonical(packet))).decode(),
         }
         signed = dict(self.grant,
