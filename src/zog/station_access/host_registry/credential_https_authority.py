@@ -124,11 +124,12 @@ def _independent_approval(grant):
         deny()
 
 
-def _authority():
+def _authority(*, allow_revoked=False):
     grant = _json_root(_GRANT_PATH)
     if set(grant) != GRANT_FIELDS or grant.get("schema") != GRANT_SCHEMA:
         deny()
-    if grant.get("state") != "approved" or grant.get("purpose") != PURPOSE:
+    if (grant.get("state") not in (("approved", "revoked") if allow_revoked else ("approved",))
+            or grant.get("purpose") != PURPOSE):
         deny()
     if grant.get("consumer") != CONSUMER or grant.get("destination") != DESTINATION:
         deny()
@@ -233,7 +234,7 @@ def _consume(grant, data, fingerprint, signature_nonce, signature_expiry):
             grant["revision"] < history.grant_revision or
             grant["credential_revision"] < history.credential_revision or
             (grant["revision"] == history.grant_revision
-             and digest != history.grant_sha256)):
+             and (digest != history.grant_sha256 or history.revoked))):
             deny()
         identity.consume(fingerprint, signature_nonce, signature_expiry)
         HttpsCredentialDeliveryNonce.objects.create(
@@ -244,6 +245,7 @@ def _consume(grant, data, fingerprint, signature_nonce, signature_expiry):
             host_id=grant["host_id"],
             defaults={"grant_revision":grant["revision"],
                       "grant_sha256":digest,
+                      "revoked":False,
                       "credential_revision":grant["credential_revision"]})
         identity.audit("credential-broker", "https-credential-request-consumed",
                        fingerprint=fingerprint,
@@ -252,6 +254,43 @@ def _consume(grant, data, fingerprint, signature_nonce, signature_expiry):
                        credential_revision=grant["credential_revision"],
                        assignment_id=grant["assignment_id"])
     return digest
+
+
+def reconcile_signed_revocation():
+    """Root-only, no-secret adoption of an operator-signed revoked grant.
+
+    Requires the exact independently installed approval and signer pin. A
+    durable tombstone survives reboot and blocks restoring older approvals.
+    Root owner must perform this *before* withdrawing the installed grant.
+    """
+    if os.geteuid() != 0:
+        deny()
+    grant = _authority(allow_revoked=True)
+    if grant["state"] != "revoked":
+        deny()
+    from .certificate_assignment_signing import canonical
+    fingerprint = hashlib.sha256(canonical(grant)).hexdigest()
+    with locked():
+        history = HttpsCredentialDeliveryRevision.objects.filter(
+            host_id=grant["host_id"]).first()
+        if history and (
+            grant["revision"] < history.grant_revision
+            or grant["credential_revision"] < history.credential_revision
+            or (grant["revision"] == history.grant_revision
+                and (fingerprint != history.grant_sha256 or not history.revoked))):
+            deny()
+        HttpsCredentialDeliveryRevision.objects.update_or_create(
+            host_id=grant["host_id"], defaults={
+                "grant_revision": grant["revision"],
+                "grant_sha256": fingerprint, "revoked": True,
+                "credential_revision": grant["credential_revision"]})
+        identity.audit("credential-operator", "https-credential-grant-revoked",
+            fingerprint=grant["fingerprint"],
+            host=Host.objects.get(pk=grant["host_id"]),
+            purpose=grant["purpose"], grant_revision=grant["revision"],
+            credential_revision=grant["credential_revision"])
+    return {"status":"revoked", "host_id":grant["host_id"],
+            "grant_revision":grant["revision"], "credential_transferred":False}
 
 
 def _read_local_token(authorization):
