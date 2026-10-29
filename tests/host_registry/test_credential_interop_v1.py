@@ -89,18 +89,23 @@ def test_actual_host_signed_http_request_and_receipt_interoperate():
         nonce="A"*24)
     request, nonce, expiry, admitted = interop.request_admit(
         posted.url, "POST", dict(posted.headers), posted.body,
-        host.public_key(), a, cd.new_ledger(a), now=now)
+        host.public_key(), a, cd.new_ledger(a), expected_origin=v["origin"], now=now)
     assert request == r and nonce == "A"*24
     assert admitted["requests"][-1]["status"] == "pending"
     with pytest.raises((ValueError, cd.CredentialProtocolError)):
         interop.request_admit(
             posted.url, "POST", dict(posted.headers), posted.body,
-            authority.public_key(), a, cd.new_ledger(a), now=now)
+            authority.public_key(), a, cd.new_ledger(a), expected_origin=v["origin"], now=now)
+    with pytest.raises(interop.InteropDenied):
+        interop.request_admit(
+            posted.url, "POST", dict(posted.headers), posted.body,
+            host.public_key(), a, cd.new_ledger(a),
+            expected_origin="https://foreign.example.test", now=now)
     with pytest.raises(interop.InteropDenied):
         interop.request_admit(
             v["origin"] + "/api/hosts/credential-delivery/v1/receive/",
             "POST", dict(posted.headers), posted.body,
-            host.public_key(), a, cd.new_ledger(a), now=now)
+            host.public_key(), a, cd.new_ledger(a), expected_origin=v["origin"], now=now)
 
     d = dict(v["delivery"], issued_at=now, expires_at=now+60)
     delivered = cd.record_delivery(admitted, d)
@@ -119,7 +124,7 @@ def test_actual_host_signed_http_request_and_receipt_interoperate():
         nonce="B"*24)
     observed, nonce2, expiry2, installed = interop.receipt_record(
         wire.url, "POST", dict(wire.headers), wire.body,
-        host.public_key(), r, d, delivered, now=now)
+        host.public_key(), r, d, delivered, expected_origin=v["origin"], now=now)
     assert observed == receipt and nonce2 == "B"*24
     assert installed["requests"][-1]["status"] == "installed"
 
