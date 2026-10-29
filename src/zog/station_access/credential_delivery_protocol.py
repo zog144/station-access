@@ -3,6 +3,8 @@
 The unprivileged HTTP ingress must not be able to manufacture authorization:
 all raw signed headers and body are verified again by the isolated broker.
 """
+import base64
+import binascii
 import json
 import re
 import uuid
@@ -20,7 +22,8 @@ NONCE = re.compile(r"[0-9a-f]{32}\Z")
 FIELDS = frozenset(("schema", "purpose", "host_id", "installation_id",
     "state_volume_id", "registry_id", "consumer", "destination",
     "authorization_id", "assignment_id", "assignment_revision",
-    "credential_revision", "nonce"))
+    "credential_revision", "nonce", "consumer_key_fingerprint",
+    "consumer_signature_ed25519"))
 HEADERS = ("Content-Type", "Content-Digest", "X-Host-Id", "X-Host-Key",
            "Signature", "Signature-Input")
 
@@ -67,6 +70,8 @@ def parse(raw):
             or data["consumer"] != CONSUMER or data["destination"] != DESTINATION
             or type(data["registry_id"]) is not str
             or not re.fullmatch(r"[a-z][a-z0-9-]{0,63}", data["registry_id"])
+            or type(data["consumer_key_fingerprint"]) is not str
+            or not HEX.fullmatch(data["consumer_key_fingerprint"])
             or type(data["authorization_id"]) is not str
             or not HEX.fullmatch(data["authorization_id"])
             or type(data["nonce"]) is not str or not NONCE.fullmatch(data["nonce"])
@@ -75,6 +80,12 @@ def parse(raw):
         deny()
     for key in ("host_id", "installation_id", "state_volume_id", "assignment_id"):
         canonical_uuid(data[key])
+    try:
+        proof = base64.b64decode(data["consumer_signature_ed25519"], validate=True)
+        if len(proof) != 64 or base64.b64encode(proof).decode("ascii") != data["consumer_signature_ed25519"]:
+            deny()
+    except (ValueError, TypeError, binascii.Error):
+        deny()
     return data
 
 
