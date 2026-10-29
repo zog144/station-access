@@ -5,6 +5,8 @@ may request *only* this narrow operation over a protected AF_UNIX socket.
 Never create root grant, assign a hostname, enroll a Host or reveal arbitrary
 vault material here. Runtime delivery is disabled unless separately installed.
 """
+import base64
+import binascii
 import hashlib
 import json
 import os
@@ -18,6 +20,8 @@ from datetime import timedelta
 from pathlib import Path
 
 from django.conf import settings
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from django.utils import timezone
 from zog.host_identify import signatures
 from zog.host_identify.storage import read_owned
@@ -76,6 +80,50 @@ def _json_root(name, mode=0o600):
         deny()
 
 
+def _independent_approval(grant):
+    """An independently installed Ed25519 operator key signs the exact grant.
+
+    The station's candidate signer/exporter is NOT an approval key. Only a
+    pre-approved native installer may place or rotate this separate root pin.
+    """
+    from .certificate_assignment_signing import canonical
+    import hmac
+    try:
+        approval_raw = _protected(getattr(
+            settings, "HOST_CREDENTIAL_HTTPS_OPERATOR_APPROVAL_FILE", ""), 0o600)
+        approval = json.loads(approval_raw)
+        if (type(approval) is not dict
+                or set(approval) != {"schema", "grant_sha256", "signature_ed25519"}
+                or approval["schema"] != "zog-credential-delivery-operator-approval-v1"
+                or not isinstance(approval["grant_sha256"], str)
+                or not HEX.fullmatch(approval["grant_sha256"])):
+            deny()
+        packet = dict(grant)
+        packet.pop("operator_approval_sha256")
+        candidate = hashlib.sha256(canonical(packet)).hexdigest()
+        if not hmac.compare_digest(approval["grant_sha256"], candidate):
+            deny()
+        sig = base64.b64decode(approval["signature_ed25519"], validate=True)
+        if len(sig) != 64 or base64.b64encode(sig).decode() != approval["signature_ed25519"]:
+            deny()
+        pin = _protected(getattr(
+            settings, "HOST_CREDENTIAL_HTTPS_OPERATOR_PIN_FILE", ""), 0o444)
+        if len(pin) != 32:
+            deny()
+        Ed25519PublicKey.from_public_bytes(pin).verify(
+            sig, b"zog-credential-delivery-operator-approval-v1\\0"
+                 + canonical(packet))
+        if hashlib.sha256(canonical(approval)).hexdigest() != grant["operator_approval_sha256"]:
+            deny()
+        station_pin = _protected(getattr(
+            settings, "HOST_CREDENTIAL_HTTPS_SIGNER_PIN_FILE", ""), 0o444)
+        if hashlib.sha256(station_pin).hexdigest() != grant["independent_signer_pin_sha256"]:
+            deny()
+    except (OSError, UnicodeError, ValueError, TypeError, InvalidSignature,
+            binascii.Error, KeyError):
+        deny()
+
+
 def _authority():
     grant = _json_root(_GRANT_PATH)
     if set(grant) != GRANT_FIELDS or grant.get("schema") != GRANT_SCHEMA:
@@ -104,6 +152,7 @@ def _authority():
             or not re.fullmatch(r"[0-9a-f]{32}", grant["grant_id"])
             or not re.fullmatch(r"[0-9a-f]{32}", grant["storage_id"])):
         deny()
+    _independent_approval(grant)
     return grant
 
 
