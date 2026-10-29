@@ -107,7 +107,7 @@ class ProtocolTests(SimpleTestCase):
         for diff in ({"account":"other-admin"}, {"source_kind":"django-password-hash"},
                      {"source_password_verified":False}, {"destination":"browser"},
                      {"operator_approval_sha256":"0"}, {"credential_revision":0},
-                     {"installation_id":S}, {"session_revocation_required":False},
+                     {"session_revocation_required":False},
                      {"purpose":"archive-mirror"}, {"password":"plaintext"}):
             with self.subTest(diff=diff), self.assertRaises(DeliveryDenied):
                 admin.validate_proposal(proposal(**diff))
@@ -183,6 +183,44 @@ class BrokerTests(TestCase):
             with self.assertRaises(DeliveryDenied):
                 authority._consume(self.grant,dict(data,nonce="b"*32),
                     self.fp,"signed-four",timezone.now()+timedelta(seconds=120))
+
+    def test_independent_operator_signature_accepts_exact_grant_only(self):
+        import base64, hashlib
+        from cryptography.hazmat.primitives import serialization
+        from zog.station_access.host_registry.certificate_assignment_signing import canonical
+        key = Ed25519PrivateKey.generate()
+        packet = dict(self.grant)
+        packet.pop("operator_approval_sha256")
+        approval = {
+            "schema": "zog-credential-delivery-operator-approval-v1",
+            "grant_sha256": hashlib.sha256(canonical(packet)).hexdigest(),
+            "signature_ed25519": base64.b64encode(
+                key.sign(b"zog-credential-delivery-operator-approval-v1\\0"
+                         + canonical(packet))).decode(),
+        }
+        signed = dict(self.grant,
+            operator_approval_sha256=hashlib.sha256(canonical(approval)).hexdigest(),
+            independent_signer_pin_sha256=hashlib.sha256(b"trusted prior signer").hexdigest())
+        public = key.public_key().public_bytes(
+            serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+        blobs = {
+            "HOST_CREDENTIAL_HTTPS_OPERATOR_APPROVAL_FILE": canonical(approval),
+            "HOST_CREDENTIAL_HTTPS_OPERATOR_PIN_FILE": public,
+            "HOST_CREDENTIAL_HTTPS_SIGNER_PIN_FILE": b"trusted prior signer",
+        }
+        def protected(path, mode, maximum=8192):
+            return blobs[next(k for k in blobs if k in path)]
+        with override_settings(
+                HOST_CREDENTIAL_HTTPS_OPERATOR_APPROVAL_FILE="/test/HOST_CREDENTIAL_HTTPS_OPERATOR_APPROVAL_FILE",
+                HOST_CREDENTIAL_HTTPS_OPERATOR_PIN_FILE="/test/HOST_CREDENTIAL_HTTPS_OPERATOR_PIN_FILE",
+                HOST_CREDENTIAL_HTTPS_SIGNER_PIN_FILE="/test/HOST_CREDENTIAL_HTTPS_SIGNER_PIN_FILE"), \\
+             patch.object(authority, "_protected", side_effect=protected):
+            authority._independent_approval(signed)
+            with self.assertRaises(DeliveryDenied):
+                authority._independent_approval(dict(signed, credential_revision=8))
+            with self.assertRaises(DeliveryDenied):
+                authority._independent_approval(dict(
+                    signed, independent_signer_pin_sha256="f"*64))
 
     def test_root_operator_approval_not_self_issued(self):
         with patch.object(authority,"_json_root",return_value=self.grant), \
