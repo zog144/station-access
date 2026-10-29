@@ -118,7 +118,7 @@ class ProtocolTests(SimpleTestCase):
         with tempfile.TemporaryDirectory() as folder:
             base=Path(folder)
             source=base/"FIRST-LOGIN.txt"
-            source.write_text("Username: station-admin\\nPassword: FirstLoginVerified123!\\n")
+            source.write_text("Username: station-admin\nPassword: FirstLoginVerified123!\n")
             source.chmod(0o600)
             output=base/"export.json"
             call_command("export_station_login", source=str(source), output=str(output))
@@ -186,7 +186,7 @@ class BrokerTests(TestCase):
                 b"zog-credential-delivery-consumer-v1\0" + canonical(claims))).decode()
         value=canonical(data)
         signed=signatures.sign(ORIGIN+PATH,value,key or self.key,H)
-        return envelope(value, {h:signed.headers[h] for h in HEADERS}).rstrip(b"\\n")
+        return envelope(value, {h:signed.headers[h] for h in HEADERS}).rstrip(b"\n")
 
     def test_independent_consumer_proof_is_checked_separately(self):
         _, _, data=unpack(self._signed())
