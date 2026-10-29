@@ -5,6 +5,7 @@ listener. Only a separately privileged local broker can authorize secrets.
 No vault, Django settings, user sessions, or root privileges are imported.
 """
 import os
+import re
 import socket
 import stat
 import struct
@@ -37,7 +38,8 @@ def relay(body, headers, *, socket_path):
             if not chunk:
                 break
             result.extend(chunk)
-        if not 20 <= len(result) <= MAX_SECRET:
+        if not 20 <= len(result) <= MAX_SECRET or not re.fullmatch(
+                rb"[A-Za-z0-9_-]{20,4096}", bytes(result)):
             deny()
         # The broker returns a token only after all gates pass. No diagnostics.
         return bytes(result)
