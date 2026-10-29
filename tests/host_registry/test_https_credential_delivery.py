@@ -101,6 +101,33 @@ class ProtocolTests(SimpleTestCase):
                     environment, lambda s,h: statuses.append(s))), b"")
                 self.assertEqual(statuses[-1], "403 Forbidden")
 
+    def test_owner_protected_first_login_export_is_not_a_hash_recovery(self):
+        import tempfile
+        from pathlib import Path
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+        from django.contrib.auth import get_user_model
+        user=get_user_model().objects.create_superuser(
+            username="station-admin", email="", password="FirstLoginVerified123!")
+        with tempfile.TemporaryDirectory() as folder:
+            base=Path(folder)
+            source=base/"FIRST-LOGIN.txt"
+            source.write_text("Username: station-admin\\nPassword: FirstLoginVerified123!\\n")
+            source.chmod(0o600)
+            output=base/"export.json"
+            call_command("export_station_login", source=str(source), output=str(output))
+            self.assertEqual(json.loads(output.read_text())["password"],
+                             "FirstLoginVerified123!")
+            user.set_password("RotatedNeverExportFromHash123!")
+            user.save(update_fields=["password"])
+            with self.assertRaises(CommandError):
+                call_command("export_station_login", source=str(source),
+                             output=str(output))
+            # An old export is retained historical secret, not rewritten by
+            # a Django password change and never a reusable approval grant.
+            self.assertEqual(json.loads(output.read_text())["password"],
+                             "FirstLoginVerified123!")
+
     def test_admin_provisioning_requires_separate_approval_and_is_disabled(self):
         valid = admin.validate_proposal(proposal())
         self.assertFalse(valid["remote_delivery_authorized"])
