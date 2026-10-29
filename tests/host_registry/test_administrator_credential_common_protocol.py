@@ -2,8 +2,13 @@ import uuid
 
 import pytest
 
-cd = pytest.importorskip(
-    "zog.host_identify.credential_delivery",
+try:
+    from zog.host_identify import credential_delivery as cd
+except ImportError:
+    cd = None
+
+pytestmark = pytest.mark.skipif(
+    cd is None,
     reason="shared credential-delivery v1 requires host-identify 0.3.5",
 )
 
