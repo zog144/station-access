@@ -58,7 +58,7 @@ def proposal(**changes):
     return value
 
 
-class ProtocolTests(SimpleTestCase):
+class ProtocolTests(TestCase):
     def test_strict_cloudflare_only_request_and_envelope(self):
         raw = request()
         headers = {k: "test" for k in HEADERS}
