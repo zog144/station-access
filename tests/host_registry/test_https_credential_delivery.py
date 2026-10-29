@@ -213,7 +213,7 @@ class BrokerTests(TestCase):
         with override_settings(
                 HOST_CREDENTIAL_HTTPS_OPERATOR_APPROVAL_FILE="/test/HOST_CREDENTIAL_HTTPS_OPERATOR_APPROVAL_FILE",
                 HOST_CREDENTIAL_HTTPS_OPERATOR_PIN_FILE="/test/HOST_CREDENTIAL_HTTPS_OPERATOR_PIN_FILE",
-                HOST_CREDENTIAL_HTTPS_SIGNER_PIN_FILE="/test/HOST_CREDENTIAL_HTTPS_SIGNER_PIN_FILE"), \\
+                HOST_CREDENTIAL_HTTPS_SIGNER_PIN_FILE="/test/HOST_CREDENTIAL_HTTPS_SIGNER_PIN_FILE"), \
              patch.object(authority, "_protected", side_effect=protected):
             authority._independent_approval(signed)
             with self.assertRaises(DeliveryDenied):
