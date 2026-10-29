@@ -313,3 +313,22 @@ class IssuerTokenReadNonce(models.Model):
     nonce = models.CharField(max_length=32, primary_key=True)
     authorization_id = models.CharField(max_length=64)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+
+class HttpsCredentialDeliveryNonce(models.Model):
+    """Durable used request identity; 48h retention, no secret or secret digest."""
+    nonce = models.CharField(primary_key=True, max_length=32)
+    host_id = models.UUIDField()
+    authorization_id = models.CharField(max_length=64)
+    credential_revision = models.PositiveBigIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+
+class HttpsCredentialDeliveryRevision(models.Model):
+    """Highest admitted protected operator grant, never reset on reboot."""
+    host_id = models.UUIDField(primary_key=True)
+    grant_revision = models.PositiveBigIntegerField()
+    grant_sha256 = models.CharField(max_length=64)
+    revoked = models.BooleanField(default=False)
+    credential_revision = models.PositiveBigIntegerField()
+    updated_at = models.DateTimeField(auto_now=True)

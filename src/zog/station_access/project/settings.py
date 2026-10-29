@@ -180,3 +180,17 @@ _progress_uid = os.environ.get("STATION_ACCESS_APPLICATION_PROGRESS_CONTROLLER_U
 STATION_ACCESS_APPLICATION_PROGRESS_CONTROLLER_UID = (
     int(_progress_uid) if _progress_uid.isdecimal() else None
 )
+
+# Dedicated HTTPS credential authority: no browser/Django routing.
+# Producer is disabled until isolated nginx ingress, protected root broker,
+# native installed-byte attestation, and separate operator approvals succeed.
+HOST_CREDENTIAL_HTTPS_BROKER_ENABLED = False
+HOST_HTTPS_CREDENTIAL_LIVE_ENABLED = False
+HOST_CREDENTIAL_HTTPS_INGRESS_UID = (
+    int(os.environ["HOST_CREDENTIAL_HTTPS_INGRESS_UID"])
+    if os.environ.get("HOST_CREDENTIAL_HTTPS_INGRESS_UID") else None
+)
+HOST_CREDENTIAL_HTTPS_AUTHORITY_FILE = os.environ.get("HOST_CREDENTIAL_HTTPS_AUTHORITY_FILE", "")
+HOST_CREDENTIAL_HTTPS_OPERATOR_APPROVAL_FILE = os.environ.get("HOST_CREDENTIAL_HTTPS_OPERATOR_APPROVAL_FILE", "")
+HOST_CREDENTIAL_HTTPS_OPERATOR_PIN_FILE = os.environ.get("HOST_CREDENTIAL_HTTPS_OPERATOR_PIN_FILE", "")
+HOST_CREDENTIAL_HTTPS_SIGNER_PIN_FILE = os.environ.get("HOST_CREDENTIAL_HTTPS_SIGNER_PIN_FILE", "")
