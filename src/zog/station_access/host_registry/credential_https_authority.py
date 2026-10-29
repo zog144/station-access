@@ -45,7 +45,8 @@ GRANT_FIELDS = frozenset(("schema", "state", "purpose", "consumer",
     "destination", "host_id", "fingerprint", "installation_id",
     "state_volume_id", "authority_id", "registry_id", "assignment_id",
     "assignment_revision", "credential_revision", "authorization_id",
-    "grant_id", "storage_id", "operator_approval_sha256",
+    "grant_id", "storage_id", "consumer_public_key",
+    "consumer_key_fingerprint", "consumer_key_revision", "operator_approval_sha256",
     "independent_signer_pin_sha256", "revision", "expires_at"))
 _PROJECTION_PATH = "HOST_ISSUER_CREDENTIAL_AUTHORIZATION_FILE"
 _GRANT_PATH = "HOST_CREDENTIAL_HTTPS_AUTHORITY_FILE"
@@ -134,11 +135,12 @@ def _authority(*, allow_revoked=False):
     if grant.get("consumer") != CONSUMER or grant.get("destination") != DESTINATION:
         deny()
     if any(type(grant[k]) is not str or not HEX.fullmatch(grant[k])
-           for k in ("fingerprint", "authorization_id",
+           for k in ("fingerprint", "consumer_key_fingerprint", "authorization_id",
                      "operator_approval_sha256", "independent_signer_pin_sha256")):
         deny()
     if any(type(grant[k]) is not int or grant[k] < 1
-           for k in ("revision", "assignment_revision", "credential_revision")):
+           for k in ("revision", "assignment_revision", "credential_revision",
+                     "consumer_key_revision")):
         deny()
     if type(grant["expires_at"]) is not int or grant["expires_at"] <= int(time.time()):
         deny()
@@ -153,6 +155,14 @@ def _authority(*, allow_revoked=False):
             or not re.fullmatch(r"[0-9a-f]{32}", grant["grant_id"])
             or not re.fullmatch(r"[0-9a-f]{32}", grant["storage_id"])):
         deny()
+    try:
+        public = base64.b64decode(grant["consumer_public_key"], validate=True)
+        if (len(public) != 32 or
+                base64.b64encode(public).decode("ascii") != grant["consumer_public_key"] or
+                hashlib.sha256(public).hexdigest() != grant["consumer_key_fingerprint"]):
+            deny()
+    except (ValueError, TypeError, binascii.Error):
+        deny()
     _independent_approval(grant)
     return grant
 
@@ -166,6 +176,22 @@ def _projection():
             or set(projection.get("authorization", {})) != ROOT_FIELDS):
         deny()
     return projection
+
+
+def _verify_consumer(grant, data):
+    """Second authenticated identity: root-installed, operator-signed consumer."""
+    from .certificate_assignment_signing import canonical
+    try:
+        if data["consumer_key_fingerprint"] != grant["consumer_key_fingerprint"]:
+            deny()
+        public = base64.b64decode(grant["consumer_public_key"], validate=True)
+        signature = base64.b64decode(data["consumer_signature_ed25519"], validate=True)
+        claims = dict(data)
+        claims.pop("consumer_signature_ed25519")
+        Ed25519PublicKey.from_public_bytes(public).verify(
+            signature, b"zog-credential-delivery-consumer-v1\\0" + canonical(claims))
+    except (ValueError, TypeError, InvalidSignature, binascii.Error, KeyError):
+        deny()
 
 
 def _current(grant, data, fingerprint, projection):
@@ -189,6 +215,7 @@ def _current(grant, data, fingerprint, projection):
             or a.get("grant_id") != grant["grant_id"]
             or a.get("storage_id") != grant["storage_id"]):
         deny()
+    _verify_consumer(grant, data)
     host = Host.objects.filter(pk=grant["host_id"], archived_at__isnull=True,
                                provider="generic").first()
     if host is None:
