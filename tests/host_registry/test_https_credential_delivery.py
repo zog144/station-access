@@ -1,4 +1,6 @@
 """HTTPS credential producer source acceptance. No real Cloudflare token."""
+import base64
+import hashlib
 import json
 import os
 import time
@@ -36,7 +38,9 @@ def request(**changes):
         registry_id="command-center", consumer="certify-manage",
         destination="issuer-dns-cloudflare", authorization_id=AUTH,
         assignment_id=A, assignment_revision=3,
-        credential_revision=4, nonce="e"*32)
+        credential_revision=4, nonce="e"*32,
+        consumer_key_fingerprint="d"*64,
+        consumer_signature_ed25519=base64.b64encode(b"0"*64).decode())
     payload.update(changes)
     return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
 
@@ -71,6 +75,8 @@ class ProtocolTests(SimpleTestCase):
             {"consumer":"browser"},
             {"host_id":"not-uuid"},
             {"credential_revision":True},
+            {"consumer_signature_ed25519":"bad"},
+            {"consumer_key_fingerprint":"broken"},
             {"nonce":"x"*32},
             {"remote_path":"/secrets"},
         ):
@@ -146,6 +152,11 @@ class BrokerTests(TestCase):
         SecurityGate.objects.get_or_create(pk=1)
         self.key=Ed25519PrivateKey.generate()
         self.fp=signatures.fingerprint(self.key.public_key())
+        self.consumer_key=Ed25519PrivateKey.generate()
+        from cryptography.hazmat.primitives import serialization
+        self.consumer_public=self.consumer_key.public_key().public_bytes(
+            serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+        self.consumer_fp=hashlib.sha256(self.consumer_public).hexdigest()
         self.host=Host.objects.create(id=uuid.UUID(H), label="issuer", provider="generic")
         HostIdentity.objects.create(host=self.host, fingerprint=self.fp,
             public_key=signatures.public_text(self.key.public_key()),
@@ -157,15 +168,39 @@ class BrokerTests(TestCase):
             state_volume_id=S, registry_id="command-center", authority_id=I,
             assignment_id=A, assignment_revision=3, credential_revision=4,
             authorization_id=AUTH, grant_id="a"*32, storage_id="b"*32,
+            consumer_public_key=base64.b64encode(self.consumer_public).decode(),
+            consumer_key_fingerprint=self.consumer_fp, consumer_key_revision=1,
             operator_approval_sha256="b"*64,
             independent_signer_pin_sha256="c"*64, revision=2,
             expires_at=int(time.time())+3600)
         self.headers = dict(signatures.sign(ORIGIN+PATH,request(),self.key,H).headers)
 
     def _signed(self, body=None, key=None):
-        value=body or request()
+        from zog.station_access.host_registry.certificate_assignment_signing import canonical
+        data=json.loads(body or request())
+        data["consumer_key_fingerprint"]=self.consumer_fp
+        claims=dict(data)
+        claims.pop("consumer_signature_ed25519")
+        data["consumer_signature_ed25519"]=base64.b64encode(
+            self.consumer_key.sign(
+                b"zog-credential-delivery-consumer-v1\\0" + canonical(claims))).decode()
+        value=canonical(data)
         signed=signatures.sign(ORIGIN+PATH,value,key or self.key,H)
-        return envelope(value, {h:signed.headers[h] for h in HEADERS}).rstrip(b"\n")
+        return envelope(value, {h:signed.headers[h] for h in HEADERS}).rstrip(b"\\n")
+
+    def test_independent_consumer_proof_is_checked_separately(self):
+        _, _, data=unpack(self._signed())
+        authority._verify_consumer(self.grant, data)
+        foreign=dict(data, consumer_key_fingerprint="f"*64)
+        with self.assertRaises(DeliveryDenied):
+            authority._verify_consumer(self.grant, foreign)
+        changed=dict(data, credential_revision=55)
+        with self.assertRaises(DeliveryDenied):
+            authority._verify_consumer(self.grant, changed)
+        foreign_key=dict(self.grant, consumer_public_key=base64.b64encode(
+            Ed25519PrivateKey.generate().public_key().public_bytes_raw()).decode())
+        with self.assertRaises(DeliveryDenied):
+            authority._verify_consumer(foreign_key, data)
 
     def test_disabled_root_broker_never_queries_vault(self):
         with override_settings(HOST_HTTPS_CREDENTIAL_LIVE_ENABLED=False):
