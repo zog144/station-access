@@ -235,6 +235,8 @@ class BrokerTests(TestCase):
         key = Ed25519PrivateKey.generate()
         packet = dict(self.grant)
         packet.pop("operator_approval_sha256")
+        packet["independent_signer_pin_sha256"] = hashlib.sha256(
+            b"trusted prior signer").hexdigest()
         approval = {
             "schema": "zog-credential-delivery-operator-approval-v1",
             "grant_sha256": hashlib.sha256(canonical(packet)).hexdigest(),
