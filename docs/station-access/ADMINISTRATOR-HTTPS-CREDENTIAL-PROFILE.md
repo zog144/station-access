@@ -1,25 +1,210 @@
-# Administrator first-login HTTPS credential profile — proposal only
+# Administrator HTTPS credential provisioning profile — source proposal only
 
-**2026-10-29:** station-access Regular + host-discover Regular handoff, **NOT enabled** in the HTTPS producer's credential purpose allowlist. This is a separate selected-account operator-authorized workflow, not a new right conferred by Host enrollment or signed beacons.
+**Date:** 2026-10-29  
+**Profile schema:** `zog-admin-credential-provisioning-proposal-v1`  
+**Shared transport:** host-identify HTTPS credential delivery v1  
+**Shared source:** `4a176373ff4cb47a66a8ab1b5fd3d6ff01ff2a3b` (host-identify 0.3.5)  
+**Purpose:** `station-administrator-password`  
+**Consumer:** `station-access`  
+**Credential ID:** `station-admin`  
+**Status:** proposal/test only; remote administrator provisioning remains disabled.
 
-## Existing reality (source reconciled)
+This profile is a purpose-specific consumer of the common HTTPS credential
+delivery design. It does not make administrator passwords generically readable
+by enrolled Hosts and is not enabled in the existing issuer-only HTTPS broker.
 
-- The initial station-admin administrator is created only when the local station database has no users. FIRST-LOGIN.txt is an owner-protected output of initial setup and may contain a recoverable initial plaintext password. It must be handled as an ephemeral bootstrap secret and not treated as automatically current after password changes.
-- The existing export_station_login command accepts an owner-only FIRST-LOGIN.txt or explicit owner-protected JSON input; it **checks the plaintext against the current active station-admin Django account** using check_password, and exports only if that account is still active, superuser and the supplied password is valid. It never reverses a Django password hash. The export is an explicit local provisioning action, not a standing web API.
-- station-access Users CRUD uses Django validators (minimum 12, common/numeric/account-similarity), stores only password hashes in Django, revokes database sessions and unused VNC grants after password/status/role changes (except an administrator's own current session when changing their own password). Existing remote export, FIRST-LOGIN.txt and registry-held credentials are **not** rewritten by account password changes. Therefore every new remote delivery/rotation requires explicit operator action with a new verifiable secret, account revision and receiving installation.
-- host-discover unstable daemon.py currently checks station_login_withdraw first; otherwise, when observer_only is false and station_login_file is configured, it reads an owner-protected 0600 JSON file (username=station-admin, password) and includes station_login in the signed heartbeat. If the file is unavailable, it logs only the exception type. station-access identity_views.heartbeat removes station_login from the ordinary report before persistence, validates it, and stores it in the separate encrypted StationCredential vault. This is the legacy push path; it **does carry plaintext inside a signed HTTPS beacon request** and must be explicitly withdrawn/replaced in a separate migration, not silently treated as the new credential-delivery endpoint. Signed heartbeat does not prove a right to receive Command-Center credentials.
-- The existing host-card StationCredential AES-GCM vault intentionally retains recoverable usernames/passwords when an authenticated beacon explicitly sends station_login; its audited browser administrator reveal is a different permission boundary. This credential is not evidence that the sender may read a Command-Center administrator password or that a different machine may receive it. Browser users authenticate to Django; machine clients use separate enrolled HostIdentity and independently approved consumer grants.
+## Existing behavior reconciled
 
-## Proposed dedicated v1 profile (source only)
+### Django account password
 
-Proposed schema zog-admin-credential-provisioning-proposal-v1 and purpose station-administrator-bootstrap. The source-only validator administrator_credential_profile.validate_proposal accepts exactly: schema, purpose, operation (first-provision or rotate), host_id, installation_id, state_volume_id, account (station-admin only), credential_revision, operator_approval_sha256, destination (protected-station-admin-state only), source_kind (first-login-verified-export or operator-provisioned-new-secret), source_password_verified=true, receiver_grant_id, account_revision and session_revocation_required=true. A valid proposal explicitly returns remote_delivery_authorized=false. There is **no source handler** in the live HTTPS broker for this purpose; generic-host and archive-mirror requests are likewise rejected.
+Django stores a one-way password hash. The Users API never returns plaintext or
+the hash. Creating/resetting an account runs the existing Django password
+validators. Password, active-state and administrator-role changes revoke
+existing database sessions and unused VNC grants; an administrator changing
+their own password keeps only the current browser session.
 
-The future owner-grant and receiver protocol must further bind exact selected local account PK/username, source account revision, approved credential revision and intended receiver Host/installation/STATE/UID/storage. A root-installed, separately signed operator approval must name whether this is bootstrap or rotation, the expected old/current credential revision (never distribute a stale password), the destination and expiry. Initial FIRST-LOGIN can be exported only if it still passes check_password and owner-protected source-file checks; a changed password invalidates that export. New rotation values must be generated or supplied through an explicit protected password-change ceremony, validated using the same Django validators and committed to account history/session revocation **before** a protected reception is authorized. Do not store plaintext in a user profile, audit row, browser cookie or machine-session claim.
+The account's concurrency revision is the existing **opaque keyed revision
+string** returned by `user_views.revision(user)`. It is not an integer counter.
+A provisioning proposal binds that exact opaque revision. Any password, role,
+active-state or other account edit changes it and makes an earlier proposal
+stale.
 
-The future receiving host must have its own operator-approved root-only account-provisioning consumer; browser administrator status on the Command-Center must not confer access to the machine credential-delivery endpoint. Record only secret-free delivery/grant revisions and receipts and maintain monotonic revocation history across reboot. Protected native confirmation must check on-disk account revision, password authentication and session invalidation after rotation before marking a delivery installed. On interruption or lost response, never replay the same one-use request or restore an old password automatically. The receiver must use its own dedicated protected channel into the selected account installation; no Django session/login/beacon carries plaintext.
+### FIRST-LOGIN
 
-## Required acceptance before any implementation is enabled
+`FIRST-LOGIN.txt` can be a recoverable plaintext only because initial setup
+intentionally wrote an owner-protected bootstrap file. It is not derived from
+the Django hash.
 
-host-discover must confirm the old station_login_file consumption semantics, signed-beacon report stripping and existing protected station-login export workflow. station-access must independently accept the existing user/account CRUD history and verified source-plaintext handling. host-install/root owner must specify safe receiver interface, exact UID and durable account state, revocation and rollback tests. Include negative cases for wrong selected account/Host/STATE/install, changed Django password, stale FIRST-LOGIN, missing operator approval, changed account revision, source ciphertext/hashed passwords, old export, session revocation failure, unchanged credential revision and unknown credential purpose. Browser access, Host enrollment, signed beacon or an inspect-only managed session **alone** may never approve the profile.
+`export_station_login` accepts an owner-only FIRST-LOGIN file or explicit
+owner-protected JSON source and calls `check_password` against the current
+active `station-admin` superuser. A stale FIRST-LOGIN password therefore fails
+after password rotation. The command does not overwrite an old export on
+failure and never reverses a password hash.
 
-**Current status: source proposal and unit/integration negatives only, remote administrator provisioning disabled.** No live password export, account mutation, session revocation, credential transport or application activation performed.
+FIRST-LOGIN should be treated as an intentionally retained bootstrap secret,
+not as automatically current account state.
+
+### Legacy station_login_file
+
+host-discover's current legacy `station_login_file` path reads an explicitly
+provisioned owner-protected 0600 JSON file containing
+`{"username":"station-admin","password":"..."}`. Only after a Host is already
+bound does it place that plaintext into a HostIdentity-signed HTTPS heartbeat.
+`station_login_withdraw=true` sends an explicit null withdrawal.
+
+station-access removes `station_login` from the ordinary report before report
+persistence and stores the credential separately in its AES-GCM
+`StationCredential` vault. This is an existing **push/export** path. It is not
+the new HTTPS delivery profile and a signed heartbeat does not authorize a Host
+to read a Command-Center administrator password.
+
+Migration away from this legacy path must be explicit: withdraw the old
+registry-held export, rotate/re-provision as needed, and do not silently reinterpret
+an old heartbeat export as a common-protocol authorization or installation
+receipt.
+
+### StationCredential vault
+
+The central StationCredential vault intentionally contains recoverable
+plaintext after decrypting its AES-GCM row because it supports explicit audited
+administrator reveal. That browser permission boundary is separate from
+machine credential authority. A vault row does not prove a Host may receive the
+secret, and browser administrator login does not confer machine-client delivery
+privileges.
+
+## Source-only proposal
+
+`administrator_credential_profile.validate_proposal()` accepts exactly:
+
+- schema and purpose above;
+- consumer `station-access`;
+- credential ID and selected account `station-admin`;
+- `first-provision` or `rotate`;
+- exact destination Host UUID and HostIdentity fingerprint;
+- exact installation UUID and STATE volume UUID;
+- exact control registry ID;
+- positive credential revision;
+- exact account database PK and opaque current account revision;
+- independently reviewed operator approval SHA-256;
+- UUID receiver grant;
+- destination `protected-station-admin-state`;
+- source kind:
+  - `first-login-verified-export`, or
+  - `operator-provisioned-new-secret`;
+- `source_password_verified=true`;
+- `session_revocation_required=true`.
+
+The returned decision is deliberately secret-free and always contains
+`remote_delivery_authorized=false`.
+
+`validate_for_account()` additionally requires the exact current
+`station-admin` PK, username, active superuser state and keyed account
+revision. A password change therefore invalidates a previously prepared
+proposal.
+
+`source_password_is_current()` performs only an in-memory one-way
+`check_password` verification. Passing the Django hash itself does not
+recover or validate the secret.
+
+## Shared HTTPS binding
+
+`common_binding()` maps the proposal to the exact host-identify v1 destination
+binding:
+
+```text
+Host UUID
+HostIdentity fingerprint
+installation UUID
+STATE volume UUID
+control registry
+consumer = station-access
+purpose = station-administrator-password
+credential_id = station-admin
+```
+
+The common protocol still requires, independently:
+
+1. HostIdentity-signed fresh request;
+2. separately trusted Credential Authority authorization;
+3. exact credential and authorization revisions;
+4. durable HTTP nonce/request anti-replay state;
+5. protected root-owned reception and account destination policy; and
+6. a secret-free HostIdentity-signed installation receipt only after durable
+   password installation and session invalidation are confirmed.
+
+This proposal is not itself a signed authorization.
+
+## First provisioning
+
+First provisioning may use a still-current FIRST-LOGIN/export secret only after:
+
+- explicit operator selection of the destination installation;
+- source-file owner/mode validation;
+- `check_password` against the current active `station-admin`;
+- exact current account revision;
+- separate operator approval and receiver grant;
+- positive credential revision.
+
+Enrollment, signed beacon, managed inspect session, browser login, or existence
+of a StationCredential row is insufficient.
+
+## Rotation
+
+Rotation requires a new explicitly supplied/generated recoverable plaintext.
+It must pass the same Django password validators and be committed through the
+normal account history/session-revocation path. The resulting new opaque
+account revision and a new credential revision are then bound into a fresh
+operator-approved proposal.
+
+Changing a Django password does **not** rewrite FIRST-LOGIN, an old
+`station_login_file`, another registry's vault row or a previous proposal.
+
+The common protocol's interruption rules apply: a delivered-but-unreceipted
+password remains uncertain; a second delivery is blocked until reconciliation,
+and cancellation after delivery forces another credential rotation rather than
+redelivering the exposed bytes.
+
+## Recovery and revocation
+
+Account history and audit metadata remain secret-free. Disabling/demoting the
+account or changing its password invalidates the bound account revision.
+Existing session/VNC revocation semantics remain authoritative.
+
+A future protected receiver must retain monotonic authorization/request/
+delivery state across restart and prove the selected account was actually
+updated before sending an installation receipt. It must never restore an old
+password merely because delivery response state was lost.
+
+## Tests and dependency adoption
+
+The existing station-access source tests prove:
+
+- FIRST-LOGIN export succeeds only while its plaintext matches the current
+  active administrator;
+- password rotation makes the old FIRST-LOGIN source fail without rewriting an
+  old export;
+- profile rejects hashes, plaintext fields in the proposal, wrong account,
+  browser consumer/destination, bad approval, unchanged/invalid revisions and
+  missing session-revocation requirement;
+- old account revision is rejected after password rotation.
+
+A focused workflow
+`.github/workflows/administrator-credential-profile.yml` checks the profile's
+exact common binding on Python 3.12 and 3.13 against host-identify
+`4a176373ff4cb47a66a8ab1b5fd3d6ff01ff2a3b`.
+
+The currently accepted station-access public companion manifest predates
+host-identify 0.3.5. This review branch does **not** rewrite that accepted
+manifest or its evidence hashes. Formal companion-pin adoption is a separate
+station-access review prerequisite before this profile can be enabled.
+
+## Activation remains blocked
+
+No generic host, browser route, signed beacon, managed session or issuer-only
+Cloudflare broker route is allowed to select this purpose. No live password was
+sent, no account was remotely mutated, no session was remotely revoked, and no
+new port-443 credential route was activated by this source work.
+
+Before activation, host-install/root ownership must define the exact protected
+administrator receiver, destination UID/storage, authority pin, interruption
+recovery and native password/session verification.

@@ -47,13 +47,16 @@ def request(**changes):
 
 def proposal(**changes):
     value = dict(schema=admin.SCHEMA, purpose=admin.PURPOSE,
-        operation="first-provision", host_id=H, installation_id=I,
-        state_volume_id=S, account="station-admin", credential_revision=4,
+        consumer=admin.CONSUMER, credential_id=admin.CREDENTIAL_ID,
+        operation="first-provision", host_id=H, host_fingerprint="b"*64,
+        installation_id=I, state_volume_id=S, registry_id="command-center",
+        account_id=7, account="station-admin", credential_revision=4,
         operator_approval_sha256="a"*64,
-        destination="protected-station-admin-state",
+        destination=admin.DESTINATION,
         source_kind="first-login-verified-export",
-        source_password_verified=True, receiver_grant_id="f"*32,
-        account_revision=3, session_revocation_required=True)
+        source_password_verified=True,
+        receiver_grant_id="00000000-0000-4000-8000-000000000115",
+        account_revision="c"*40, session_revocation_required=True)
     value.update(changes)
     return value
 
@@ -69,7 +72,7 @@ class ProtocolTests(TestCase):
 
     def test_other_purposes_and_expanded_requests_never_admit(self):
         for change in (
-            {"purpose":"station-administrator-bootstrap"},
+            {"purpose":admin.PURPOSE},
             {"purpose":"archive-mirror"},
             {"destination":"anywhere"},
             {"consumer":"browser"},
@@ -138,13 +141,59 @@ class ProtocolTests(TestCase):
     def test_admin_provisioning_requires_separate_approval_and_is_disabled(self):
         valid = admin.validate_proposal(proposal())
         self.assertFalse(valid["remote_delivery_authorized"])
-        for diff in ({"account":"other-admin"}, {"source_kind":"django-password-hash"},
-                     {"source_password_verified":False}, {"destination":"browser"},
-                     {"operator_approval_sha256":"0"}, {"credential_revision":0},
-                     {"session_revocation_required":False},
-                     {"purpose":"archive-mirror"}, {"password":"plaintext"}):
-            with self.subTest(diff=diff), self.assertRaises(DeliveryDenied):
+        self.assertEqual(valid["purpose"], "station-administrator-password")
+        for diff in (
+            {"account":"other-admin"},
+            {"consumer":"browser"},
+            {"credential_id":"other"},
+            {"source_kind":"django-password-hash"},
+            {"source_password_verified":False},
+            {"destination":"browser"},
+            {"operator_approval_sha256":"0"},
+            {"credential_revision":0},
+            {"session_revocation_required":False},
+            {"purpose":"archive-mirror"},
+            {"host_fingerprint":"0"},
+            {"registry_id":"../primary"},
+            {"account_revision":3},
+            {"password":"plaintext"},
+        ):
+            with self.subTest(diff=diff), self.assertRaises(
+                    admin.AdministratorCredentialProfileError):
                 admin.validate_proposal(proposal(**diff))
+
+    def test_admin_profile_binds_current_account_revision_without_hash_recovery(self):
+        from django.contrib.auth import get_user_model
+        from zog.station_access.host_registry.user_views import revision
+
+        user=get_user_model().objects.create_superuser(
+            username="station-admin", email="",
+            password="FirstLoginVerified123!")
+        current=proposal(account_id=user.pk, account_revision=revision(user))
+        self.assertFalse(admin.validate_for_account(
+            current, user)["remote_delivery_authorized"])
+        self.assertTrue(admin.source_password_is_current(
+            user, "FirstLoginVerified123!"))
+        # A Django password hash is not a recoverable or valid source secret.
+        self.assertFalse(admin.source_password_is_current(user, user.password))
+
+        user.set_password("RotatedNeverExportFromHash123!")
+        user.save(update_fields=["password"])
+        self.assertFalse(admin.source_password_is_current(
+            user, "FirstLoginVerified123!"))
+        with self.assertRaisesRegex(
+                admin.AdministratorCredentialProfileError,
+                "administrator-account-changed"):
+            admin.validate_for_account(current, user)
+
+        rotated=proposal(
+            operation="rotate", credential_revision=5,
+            source_kind="operator-provisioned-new-secret",
+            account_id=user.pk, account_revision=revision(user))
+        self.assertTrue(admin.source_password_is_current(
+            user, "RotatedNeverExportFromHash123!"))
+        self.assertFalse(admin.validate_for_account(
+            rotated, user)["remote_delivery_authorized"])
 
 
 @override_settings(HOST_IDENTITY_ORIGIN=ORIGIN, HOST_HTTPS_CREDENTIAL_LIVE_ENABLED=True)
