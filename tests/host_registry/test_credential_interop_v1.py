@@ -86,7 +86,7 @@ def test_actual_host_signed_http_request_and_receipt_interoperate():
     r = dict(v["request"], created_at=now, expires_at=now+60)
     posted = cd.prepare_request(
         v["origin"] + v["request_path"], r, a, host,
-        now=datetime.now(timezone.utc), nonce="A"*24)
+        nonce="A"*24)
     request, nonce, expiry, admitted = interop.request_admit(
         posted.url, "POST", dict(posted.headers), posted.body,
         host.public_key(), a, cd.new_ledger(a), now=now)
@@ -116,7 +116,7 @@ def test_actual_host_signed_http_request_and_receipt_interoperate():
     }
     wire = cd.prepare_receipt(
         v["origin"] + v["receipt_path"], receipt, r, d, host,
-        now=datetime.now(timezone.utc), nonce="B"*24)
+        nonce="B"*24)
     observed, nonce2, expiry2, installed = interop.receipt_record(
         wire.url, "POST", dict(wire.headers), wire.body,
         host.public_key(), r, d, delivered, now=now)
