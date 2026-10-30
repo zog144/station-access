@@ -55,7 +55,7 @@ def test_independent_operator_approval_exact_envelope_and_separate_key():
     with override_settings(
             HOST_CREDENTIAL_V1_AUTHORITY_APPROVAL_FILE="/root/authority-approval",
             HOST_CREDENTIAL_HTTPS_OPERATOR_PIN_FILE="/root/operator-pin",
-            HOST_CREDENTIAL_HTTPS_SIGNER_PIN_FILE="/root/station-pin"), \\
+            HOST_CREDENTIAL_HTTPS_SIGNER_PIN_FILE="/root/station-pin"), \
          patch.object(approval.protected, "_protected",
                       side_effect=lambda path, mode: contents[path]):
         assert approval.verify(grant, envelope, raw(authority), auth)
