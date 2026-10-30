@@ -58,7 +58,8 @@ def inspect(root=ROOT, *, accepted=None, candidate=None, pyproject=None):
         },
         "zog144/host-install": {
             "old": "e6e474c63749a614fcf934d547d70b2bd12d7ce0",
-            "new": "79ad2b6f72c89acfca998d393664151010db7134",
+            "new": "6e8b3792c6bc43e6b55dd254892105f7abea5a29",
+            "parent": "79ad2b6f72c89acfca998d393664151010db7134",
             "version": "0.14.3",
         },
     }
@@ -74,6 +75,8 @@ def inspect(root=ROOT, *, accepted=None, candidate=None, pyproject=None):
                 or entry.get("accepted_baseline_commit") != expected["old"]
                 or entry.get("candidate_commit") != expected["new"]
                 or entry.get("candidate_component_version") != expected["version"]
+                or (expected.get("parent") is not None
+                    and entry.get("correction_parent") != expected["parent"])
                 or entry.get("rights_acceptance") != "pending-independent-review"
                 or entry.get("consumer_acceptance") != "pending-independent-review"
                 or entry.get("native_installation_approval") != "not-authorized"):
