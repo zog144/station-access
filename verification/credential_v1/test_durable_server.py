@@ -158,8 +158,7 @@ def test_same_revision_authority_envelope_change_is_rejected():
     assert service.reconcile_authorization(advanced) == ("approved", 3)
 
 
-def test_root_broker_signs_delivery_and_accepts_receipt_only_after_commit():
-    import os
+def test_root_broker_emits_signed_delivery_only_after_durable_commit():
     from unittest.mock import patch
     from django.test import override_settings
     from zog.station_access.host_registry import credential_v1_authority as server
