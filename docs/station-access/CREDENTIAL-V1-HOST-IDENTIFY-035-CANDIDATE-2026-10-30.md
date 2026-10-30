@@ -1,0 +1,25 @@
+# station-access — host-identify 0.3.5 dependency correction and protected installation handoff
+
+Date: 2026-10-30. Scope: SOURCE-ONLY dependency preparation stacked on draft station-access PR #11. **No protected authority installation, source publication, operator approval, HTTP listener activation or credential transfer** is performed by this correction.
+
+## Root cause and exact correction
+
+- Prior `station-access/pyproject.toml` declared `host-identify==0.3.4`, and the previously accepted source companion manifest selected `zog144/host-identify@1a5eac0b255c995022db6a3a4c0051efffa748cc` (component version 0.3.4).
+- Canonical HTTPS authority `zog.host_identify.credential_delivery` in draft PR #11 requires version **0.3.5** at full Git source commit **`4a176373ff4cb47a66a8ab1b5fd3d6ff01ff2a3b`**, implementing shared signed request, delivery, installation receipt, cancellation and ledger. The earlier separately pinned interoperability suite installed 0.3.5 and passed, but that did not update station runtime metadata or native installed software.
+- Runtime `pyproject.toml` now requires `host-identify==0.3.5`. A separate `credential-v1-companion-candidate.json` records **candidate 0.3.5** alongside the unchanged previously accepted `public-companion-pins.json`. The accepted legacy entry and its October 22 evidence are not rewritten or falsely reused.
+- Full Django CI now checks out the candidate host-identify commit **only for source candidate verification**, verifies source revision, `__version__`, canonical `credential_delivery.py`, public license declaration, installed 0.3.5 distribution metadata, shared signed protocol schema and `pip check`. All nine other companions retain their exact previously accepted source commits. The focused canonical interop CI uses and cross-checks the same exact 0.3.5 source candidate.
+- Candidate validation intentionally refuses `rights_acceptance=accepted`, `consumer_acceptance=accepted`, publication approval, native installation approval or real credential-delivery approval. `tools/check-credential-v1-candidate.py` and negative tests stop baseline/pin drift or forged approval. Source CI success remains distinct from operator/native permission.
+
+## Exact next Work handoff (protected authority)
+
+**Stage 0: read-only source reconciliation.** Verify this branch/PR and exact commit, `host-identify@4a176373ff4cb47a66a8ab1b5fd3d6ff01ff2a3b`, the unchanged `public-companion-pins.json` accepted baseline, and separate pending candidate. Independently review 0.3.5 public-source/rights evidence and cross-consumer compatibility before changing the accepted companion manifest or installing source in a privileged runtime. Attest the desired wheel bytes and RECORD against reviewed source. Record explicit operator disposition on source pin adoption.
+
+**Stage 1: protected authority installation preparation only, with separate owner authorization.** After the required source/adoption approval, select the Command-Center Host and exact installation/STATE. Verify independent operator public pin; old certificate-assignment signer pin; **different** Credential Authority v1 public pin and root-private PEM; separately operator-signed narrow grant and domain-separated exact canonical authorization-envelope endorsement. Read back installed file ownership/mode/link/inode, retained signer provenance, signed hostname/managed DNS-01 assignment and owner ledger. No private token read, no nginx route, no systemd socket activation.
+
+**Stage 2: native read-only checks, still no secret.** Confirm installed source/RECORD and host-identify 0.3.5 runtime, private HTTP ingress vs root AF_UNIX broker UID/DAC, independent trust pins, `SecurityGate` SQLite ledger migration `0019`, signature/operation replay and restart/reboot persistence, fail-closed missing/foreign signer or grant, fragmented signed responses, cancellation and credential rotation-required behavior. Run synthetic only.
+
+**Separate Stage 3:** real credential delivery is NOT authorized by the source pin correction or staging. It requires separately accepted root-control/host-install consumer anonymous-FD installation and signed receipt, root file-update synchronization with SecurityGate, deployed HTTPS route approval and an explicit operator GO. Do not enable the old SSH/PR #9 raw-token paths, Certbot, DNS-01/ACME or nginx merely because a source test passes.
+
+## Review outputs requested
+
+Return (nonsecret) the exact source/CI commit and installed host-identify version/record, accepted-base vs candidate-pin status, independent key/authorization fingerprints and grant revision/expiry, ingress/broker installed-byte and DAC checks, STATE ledger and restart/reboot results, consumer contract evidence, blockers and an explicit NO-GO/GO for **preparation** separate from activation. Preserve previous original Host preparation and its history; never reinitialize STATE to resolve dependency mismatch.
