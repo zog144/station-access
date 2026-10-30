@@ -73,3 +73,90 @@ def test_independent_operator_approval_exact_envelope_and_separate_key():
         contents["/root/operator-pin"] = station_pin
         with pytest.raises(ValueError):
             approval.verify(grant, envelope, raw(authority), auth)
+
+
+def test_canonical_authority_loader_verifies_distinct_key_and_operator_signature():
+    """Exercise signer PEM, v1 signed envelope and operator approval together."""
+    from unittest.mock import patch
+    from cryptography.hazmat.primitives import serialization
+    from zog.station_access.host_registry import credential_v1_authority as authority
+    operator, signing_key, raw, auth, _, _, _, station_pin = values()
+    # Real canonical Cloudflare credential identities have the selected UUID
+    # embedded in the nonsecret public credential_id field.
+    selected_id = "00000000-0000-4000-8000-000000000014"
+    auth = dict(auth, credential_id="cloudflare-" + selected_id.replace("-", ""))
+    envelope = cd.canonical(cd.sign_authorization(auth, signing_key))
+    grant = {
+        "host_id": auth["host_id"], "fingerprint": auth["host_fingerprint"],
+        "installation_id": auth["installation_id"],
+        "state_volume_id": auth["state_volume_id"],
+        "registry_id": auth["registry_id"],
+        "revision": auth["revision"],
+        "credential_revision": auth["credential_revision"],
+        "expires_at": auth["expires_at"] + 1800,
+    }
+    endorsement = {
+        "schema": approval.SCHEMA,
+        "grant_sha256": hashlib.sha256(cd.canonical(grant)).hexdigest(),
+        "authorization_envelope_sha256": hashlib.sha256(envelope).hexdigest(),
+        "authority_signer_sha256": hashlib.sha256(raw(signing_key)).hexdigest(),
+        "authorization_id": auth["authorization_id"],
+        "revision": auth["revision"],
+        "expires_at": auth["expires_at"] + 900,
+    }
+    endorsement["signature_ed25519"] = base64.b64encode(operator.sign(
+        approval.SCHEMA.encode() + bytes([0])
+        + cd.canonical(endorsement))).decode("ascii")
+    signer_pem = signing_key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption())
+    protected = {
+        "/root/v1-key": signer_pem,
+        "/root/v1-pin": raw(signing_key),
+        "/root/v1-envelope": envelope,
+        "/root/v1-endorsement": cd.canonical(endorsement),
+        "/root/operator-pin": raw(operator),
+        "/root/station-pin": station_pin,
+    }
+    def read_protected(path, mode, maximum=8192):
+        return protected[path]
+    with override_settings(
+            HOST_IDENTITY_ORIGIN=V["origin"],
+            HOST_CREDENTIAL_V1_SIGNING_KEY_FILE="/root/v1-key",
+            HOST_CREDENTIAL_V1_SIGNER_PIN_FILE="/root/v1-pin",
+            HOST_CREDENTIAL_V1_AUTHORIZATION_FILE="/root/v1-envelope",
+            HOST_CREDENTIAL_V1_AUTHORITY_APPROVAL_FILE="/root/v1-endorsement",
+            HOST_CREDENTIAL_HTTPS_OPERATOR_PIN_FILE="/root/operator-pin",
+            HOST_CREDENTIAL_HTTPS_SIGNER_PIN_FILE="/root/station-pin"), \\
+         patch.object(authority.legacy, "_authority", return_value=grant), \\
+         patch.object(authority.legacy, "_projection",
+                      return_value={"authorization":{"credential_id":selected_id}}), \\
+         patch.object(authority.legacy, "_protected", side_effect=read_protected):
+        confirmed_grant, confirmed_auth, confirmed_signer = (
+            authority._identity_and_authorization())
+        assert confirmed_grant == grant
+        assert confirmed_auth == auth
+        assert raw(confirmed_signer) == raw(signing_key)
+        # Switching the installed private signer must fail its pinned public
+        # key check even when the authorization envelope has not changed.
+        other = Ed25519PrivateKey.generate()
+        protected["/root/v1-key"] = other.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption())
+        with pytest.raises(ValueError):
+            authority._identity_and_authorization()
+        protected["/root/v1-key"] = signer_pem
+        # Replacing the envelope, without independent operator endorsement,
+        # fails even when a new valid Credential Authority signature exists.
+        changed = dict(auth, expires_at=auth["expires_at"] - 60)
+        protected["/root/v1-envelope"] = cd.canonical(
+            cd.sign_authorization(changed, signing_key))
+        with pytest.raises(ValueError):
+            authority._identity_and_authorization()
+        protected["/root/v1-envelope"] = envelope
+        # A reused station certificate signer key fails role separation.
+        protected["/root/station-pin"] = raw(signing_key)
+        with pytest.raises(ValueError):
+            authority._identity_and_authorization()
