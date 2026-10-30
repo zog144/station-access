@@ -95,6 +95,18 @@ class OfflineCommandCenterTests(unittest.TestCase):
         with self.assertRaises(check.OfflineIdentityDenied):
             self.verify(signed(key, changed), pin, observed, now)
 
+    def test_operator_key_is_not_the_certificate_signer_and_db_is_not_writable(self):
+        key, pin, observed, fields, now = example()
+        for patch in (
+            {"certificate_signer_pin_sha256": hashlib.sha256(pin).hexdigest()},
+            {"database_mode": 0o666},
+        ):
+            with self.subTest(patch=patch), self.assertRaises(
+                    check.OfflineIdentityDenied):
+                modified = dict(fields, **patch)
+                self.verify(signed(key, modified), pin,
+                            dict(observed, mode=modified["database_mode"]), now)
+
     def test_cannot_relabel_enrolled_host_as_command_center(self):
         key, pin, observed, fields, now = example()
         fields["command_center_host_id"] = fields["enrolled_consumer_host_id"]
