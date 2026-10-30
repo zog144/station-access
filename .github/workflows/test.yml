@@ -158,11 +158,14 @@ jobs:
               raise SystemExit(f"Companion repository set differs: {sorted(set(pinned) ^ set(expected))}")
           if not all(re.fullmatch(r"[0-9a-f]{40}", sha) for sha in pinned.values()):
               raise SystemExit("Every companion pin must be a full immutable Git commit")
+          candidate_overrides = {
+              candidate["repository"]: candidate["candidate_commit"],
+              **{item["repository"]: item["candidate_commit"]
+                 for item in candidate["additional_candidates"]},
+          }
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as outputs:
               for repository, label in expected.items():
-                  selection = (candidate["candidate_commit"]
-                               if repository == "zog144/host-identify" else pinned[repository])
-                  print(f"{label}={selection}", file=outputs)
+                  print(f"{label}={candidate_overrides.get(repository, pinned[repository])}", file=outputs)
           PY
 
 
@@ -254,15 +257,19 @@ jobs:
           from pathlib import Path
           handoff = json.loads(Path("public-companion-pins.json").read_text())
           candidate = json.loads(Path("credential-v1-companion-candidate.json").read_text())
+          overrides = {
+              candidate["repository"]: candidate["candidate_commit"],
+              **{item["repository"]: item["candidate_commit"]
+                 for item in candidate["additional_candidates"]},
+          }
           for item in handoff["dependencies"]:
               name = item["repository"]
               path = Path("dependencies") / name
               observed = subprocess.check_output(["git", "-C", str(path), "rev-parse", "HEAD"], text=True).strip()
-              expected = (candidate["candidate_commit"]
-                          if name == "zog144/host-identify" else item["commit"])
+              expected = overrides.get(name, item["commit"])
               if observed != expected:
                   raise SystemExit(f"Mismatch in {name}: expected {expected}, observed {observed}")
-              print(f"{name}: {observed}" + (" (unaccepted HTTPS candidate)" if name == "zog144/host-identify" else ""))
+              print(f"{name}: {observed}" + (" (unaccepted HTTPS candidate)" if name in overrides else ""))
           host_source = Path("dependencies/zog144/host-identify")
           if '__version__ = "0.3.5"' not in (host_source / "src/zog/host_identify/__init__.py").read_text():
               raise SystemExit("host-identify source version is not 0.3.5")
@@ -270,6 +277,20 @@ jobs:
               raise SystemExit("Canonical HTTPS credential protocol module absent")
           if "BSD-3-Clause OR GPL-3.0-only" not in (host_source / "LICENSE").read_text():
               raise SystemExit("host-identify license grant absent")
+          discovery_source = Path("dependencies/zog144/host-discover")
+          install_source = Path("dependencies/zog144/host-install")
+          def verify_metadata(path, version, required):
+              import tomllib
+              data = tomllib.loads((path / "pyproject.toml").read_text())
+              if data["project"]["version"] != version:
+                  raise SystemExit(f"{path} component version is not {version}")
+              if not set(required) <= set(data["project"]["dependencies"]):
+                  raise SystemExit(f"{path} required compatible dependencies not met")
+              if "BSD-3-Clause OR GPL-3.0-only" not in (path / "LICENSE").read_text():
+                  raise SystemExit(f"{path} missing public first-party license declaration")
+          verify_metadata(discovery_source, "0.4.13", [
+              "host-identify==0.3.5", "host-install==0.14.3"])
+          verify_metadata(install_source, "0.14.3", [])
           PY
 
       - name: Install pinned third-party and Zog components
@@ -293,6 +314,8 @@ jobs:
           import importlib.metadata
           from zog.host_identify import credential_delivery
           assert importlib.metadata.version("host-identify") == "0.3.5"
+          assert importlib.metadata.version("host-discover") == "0.4.13"
+          assert importlib.metadata.version("host-install") == "0.14.3"
           assert credential_delivery.REQUEST_SCHEMA == "zog-credential-request-v1"
           assert credential_delivery.DELIVERY_ENVELOPE_SCHEMA == "zog-credential-delivery-envelope-v1"
           assert credential_delivery.RECEIPT_SCHEMA == "zog-credential-installation-receipt-v1"
