@@ -111,6 +111,7 @@ def verify(attestation_bytes, independent_operator_public_key, observed, *,
                 or claim["station_source_commit"] != expected_source_commit
                 or not _HEX64.fullmatch(claim["external_host_evidence_sha256"])
                 or not _HEX64.fullmatch(claim["certificate_signer_pin_sha256"])
+                or claim["certificate_signer_pin_sha256"] == expected_operator_sha256
                 or not _REGISTRY.fullmatch(claim["station_registry_id"])):
             _deny()
         for field in ("command_center_host_id", "command_center_installation_id",
@@ -131,7 +132,7 @@ def verify(attestation_bytes, independent_operator_public_key, observed, *,
                 or claim["issued_at"] > now
                 or claim["expires_at"] <= now
                 or claim["expires_at"] > claim["issued_at"] + 30 * 86400
-                or claim["database_mode"] & 0o7000):
+                or claim["database_mode"] & 0o7022):
             _deny()
         path = claim["database_path"]
         if (type(path) is not str or not path.startswith("/")
