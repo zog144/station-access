@@ -186,3 +186,21 @@ def test_root_broker_emits_signed_delivery_only_after_durable_commit():
         assert proof["delivery"]["secret"] == __import__("base64").b64encode(synthetic).decode()
         assert HttpsCredentialV1Ledger.objects.get().state["requests"][-1]["status"] == "delivered"
         assert synthetic.decode() not in json.dumps(HttpsCredentialV1Ledger.objects.get().state)
+
+
+def test_changed_root_policy_aborts_before_delivery_commit():
+    from zog.station_access.host_registry.models import (
+        HttpsCredentialV1Ledger, HttpsCredentialV1Operation)
+    service, key, signing_key, now, auth, request, delivery = setup()
+    wire = send(key, request, V["request_path"], "H"*24)
+    service.request_admit(
+        auth=auth, url=wire.url, headers=dict(wire.headers), body=wire.body,
+        host_key=key.public_key(), origin=V["origin"], now=now)
+    def revoked():
+        raise ValueError("protected-policy-changed")
+    with pytest.raises(ValueError, match="protected-policy-changed"):
+        service.delivery_commit(
+            auth=auth, request_id=request["request_id"], value=delivery,
+            signing_key=signing_key, now=now, before_commit=revoked)
+    assert HttpsCredentialV1Ledger.objects.get().state["requests"][-1]["status"] == "pending"
+    assert HttpsCredentialV1Operation.objects.get().delivery_metadata == {}
