@@ -160,3 +160,37 @@ def test_canonical_authority_loader_verifies_distinct_key_and_operator_signature
         protected["/root/station-pin"] = raw(signing_key)
         with pytest.raises(ValueError):
             authority._identity_and_authorization()
+
+
+def test_isolated_https_ingress_reads_fragmented_signed_stream_with_bounds():
+    from zog.station_access import credential_v1_https_ingress as ingress
+
+    class Stream:
+        def __init__(self, fragments):
+            self.fragments = list(fragments)
+
+        def recv(self, maximum):
+            if not self.fragments:
+                return b""
+            part = self.fragments.pop(0)
+            assert len(part) <= maximum
+            return part
+
+    authority_key = Ed25519PrivateKey.from_private_bytes(
+        bytes.fromhex(V["authority_seed_hex"]))
+    body = cd.canonical(cd.sign_delivery(V["delivery"], authority_key))
+    frame = b"J" + body
+    assert ingress._consume_broker_reply(
+        Stream([frame[:2], frame[2:47], frame[47:100], frame[100:], b""]),
+        ingress.PATH) == (200, body)
+    assert ingress._consume_broker_reply(
+        Stream([b"A", b""]), ingress.PATH + "/receipt") == (204, b"")
+    with pytest.raises(ValueError):
+        ingress._consume_broker_reply(
+            Stream([frame[:70], b""]), ingress.PATH)
+    with pytest.raises(ValueError):
+        ingress._consume_broker_reply(
+            Stream([b"Aextra", b""]), ingress.PATH + "/cancel")
+    with pytest.raises(ValueError):
+        ingress._consume_broker_reply(
+            Stream([b"J" + b"x" * ingress.MAX_RESPONSE]), ingress.PATH)
