@@ -49,6 +49,35 @@ def inspect(root=ROOT, *, accepted=None, candidate=None, pyproject=None):
             or "host-identify==0.3.5" not in pyproject["project"]["dependencies"]
             or "host-identify==0.3.4" in pyproject["project"]["dependencies"]):
         raise ValueError("HTTPS dependency candidate or accepted provenance mismatch")
+    other = candidate.get("additional_candidates")
+    needed = {
+        "zog144/host-discover": {
+            "old": "0f2c6fd5cb33528ed2fe9fd1c855d2f691db6f80",
+            "new": "ebe83775e9099fd406f6ad9213a42b25bade5b13",
+            "version": "0.4.13",
+        },
+        "zog144/host-install": {
+            "old": "e6e474c63749a614fcf934d547d70b2bd12d7ce0",
+            "new": "79ad2b6f72c89acfca998d393664151010db7134",
+            "version": "0.14.3",
+        },
+    }
+    accepted_pins = {x["repository"]: x["commit"]
+                     for x in dependencies}
+    if (type(other) is not list or len(other) != len(needed)
+            or not all(type(entry) is dict for entry in other)
+            or {x.get("repository") for x in other} != set(needed)):
+        raise ValueError("Missing explicit compatible companion candidates")
+    for entry in other:
+        expected = needed[entry["repository"]]
+        if (accepted_pins.get(entry["repository"]) != expected["old"]
+                or entry.get("accepted_baseline_commit") != expected["old"]
+                or entry.get("candidate_commit") != expected["new"]
+                or entry.get("candidate_component_version") != expected["version"]
+                or entry.get("rights_acceptance") != "pending-independent-review"
+                or entry.get("consumer_acceptance") != "pending-independent-review"
+                or entry.get("native_installation_approval") != "not-authorized"):
+            raise ValueError("Dependent source candidate does not match exact version chain")
     return SOURCE
 
 
