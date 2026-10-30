@@ -169,7 +169,8 @@ def test_root_broker_emits_signed_delivery_only_after_durable_commit():
     synthetic = b"SYNTHETIC_TEST_ONLY_TOKEN"
     with override_settings(
             HOST_CREDENTIAL_V1_BROKER_ENABLED=True,
-            HOST_CREDENTIAL_V1_LIVE_ENABLED=True), \
+            HOST_CREDENTIAL_V1_LIVE_ENABLED=True,
+            HOST_IDENTITY_ORIGIN=V["origin"]), \
          patch.object(server.os, "geteuid", return_value=0), \
          patch.object(server, "_context",
                       return_value=(grant, auth, signing_key, key.public_key())), \
