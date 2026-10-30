@@ -188,9 +188,22 @@ def handle(route, headers, body):
             "secret_format": "base64",
             "secret": base64.b64encode(token).decode("ascii"),
         }
-        return 200, store.delivery_commit(
+        def recheck_approved_policy():
+            current_grant, current_auth, current_signer, _ = _context()
+            if (current_grant != grant or current_auth != authorization
+                    or signatures.fingerprint(current_signer.public_key()) !=
+                       signatures.fingerprint(signer.public_key())):
+                deny()
+
+        # Check once under the durable SecurityGate writer, then once after
+        # commit before releasing the signed secret. Native grant updates must
+        # also coordinate with this writer; source alone is not native GO.
+        response = store.delivery_commit(
             auth=authorization, request_id=request_id, value=delivery,
-            signing_key=signer, now=now)
+            signing_key=signer, now=now,
+            before_commit=recheck_approved_policy)
+        recheck_approved_policy()
+        return 200, response
     if route == RECEIPT_PATH:
         store.receipt_commit(auth=authorization, url=url, headers=headers,
                              body=body, host_key=host_key, origin=origin)
