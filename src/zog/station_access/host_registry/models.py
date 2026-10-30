@@ -332,3 +332,22 @@ class HttpsCredentialDeliveryRevision(models.Model):
     revoked = models.BooleanField(default=False)
     credential_revision = models.PositiveBigIntegerField()
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class HttpsCredentialV1Ledger(models.Model):
+    """Durable canonical host-identify v1 state; never contains secret material."""
+    subject_sha256 = models.CharField(primary_key=True, max_length=64)
+    host_id = models.UUIDField(db_index=True)
+    credential_id = models.CharField(max_length=63)
+    authorization_id = models.UUIDField()
+    state = models.JSONField()
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class HttpsCredentialV1Operation(models.Model):
+    """One request, protected receipt/cancel correlation; no token or hash."""
+    request_id = models.UUIDField(primary_key=True)
+    ledger = models.ForeignKey(HttpsCredentialV1Ledger, on_delete=models.PROTECT)
+    request = models.JSONField()
+    delivery_metadata = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
