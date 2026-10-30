@@ -70,3 +70,65 @@ def test_signed_revocation_highwater():
     assert HttpsCredentialV1Ledger.objects.get().state["authorization_status"] == "revoked"
     with pytest.raises(cd.CredentialProtocolError):
         service.reconcile_authorization(auth)
+
+
+def test_delivered_unreceipted_blocks_second_request_and_requires_rotation():
+    from zog.station_access.host_registry.models import HttpsCredentialV1Ledger
+    service, key, signing_key, now, auth, request, delivery = setup()
+    first = send(key, request, V["request_path"], "C"*24)
+    service.request_admit(
+        auth=auth, url=first.url, headers=dict(first.headers), body=first.body,
+        host_key=key.public_key(), origin=V["origin"], now=now)
+    service.delivery_commit(
+        auth=auth, request_id=request["request_id"], value=delivery,
+        signing_key=signing_key, now=now)
+    second = dict(request, request_id="00000000-0000-4000-8000-000000000099")
+    second_http = send(key, second, V["request_path"], "D"*24)
+    with pytest.raises(cd.CredentialProtocolError):
+        service.request_admit(
+            auth=auth, url=second_http.url, headers=dict(second_http.headers),
+            body=second_http.body, host_key=key.public_key(), origin=V["origin"],
+            now=now)
+    cancel = {
+        "schema": cd.CANCEL_SCHEMA,
+        **{k: request[k] for k in (
+            "host_id", "host_fingerprint", "installation_id", "state_volume_id",
+            "registry_id", "consumer", "purpose", "credential_id",
+            "credential_revision", "authorization_id",
+            "authorization_revision", "request_id")},
+        "cancel_id": "00000000-0000-4000-8000-000000000008",
+        "reason": "interruption-recovery", "created_at": now,
+        "expires_at": now + 60}
+    cancelled = send(key, cancel, V["cancel_path"], "E"*24)
+    assert service.cancel_commit(
+        auth=auth, url=cancelled.url, headers=dict(cancelled.headers),
+        body=cancelled.body, host_key=key.public_key(),
+        origin=V["origin"], now=now) is True
+    current = HttpsCredentialV1Ledger.objects.get().state
+    assert current["requests"][-1]["status"] == "cancelled-after-delivery"
+    assert current["rotation_required"] is True
+    with pytest.raises(cd.CredentialProtocolError):
+        service.request_admit(
+            auth=auth, url=second_http.url, headers=dict(second_http.headers),
+            body=second_http.body, host_key=key.public_key(), origin=V["origin"],
+            now=now)
+
+
+def test_canonical_wsgi_remains_disabled_and_browser_routes_are_denied():
+    from io import BytesIO
+    from unittest.mock import patch
+    from zog.station_access import credential_v1_https_ingress as ingress
+    headers = []
+    environ = {
+        "REQUEST_METHOD": "POST", "PATH_INFO": V["request_path"],
+        "QUERY_STRING": "", "wsgi.url_scheme": "https",
+        "CONTENT_TYPE": "application/json", "CONTENT_LENGTH": "2",
+        "wsgi.input": BytesIO(b"{}")}
+    with patch.object(ingress, "relay", side_effect=AssertionError("unexpected relay")):
+        assert b"".join(ingress.application(
+            environ, lambda status, hdrs: headers.append(status))) == b""
+        assert headers[-1] == "403 Forbidden"
+        environ["PATH_INFO"] = "/api/hosts/"
+        assert b"".join(ingress.application(
+            environ, lambda status, hdrs: headers.append(status))) == b""
+        assert headers[-1] == "403 Forbidden"
