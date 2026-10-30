@@ -72,6 +72,26 @@ The command reads and emits **only a nonsecret, unsigned review report** with it
 4. **Review, then seek actual approval**: return source/RECORD, trusted operator pin fingerprint and proof of its independent origin, native Command-Center identity evidence digest, signed root-grant/envelope and signer-endorsement digests, full expiry/revision/consumer/hostname bindings, original certificate-signer fingerprint, protected path/inode/DAC, and an explicit **review-only** status. The operator then approves the exact content separately. The prior offline software-staging approval remains valid; do not ask for it again.
 5. **No production adoption** until protected owner simultaneously coordinates root grant/authorization changes with the SQLite `SecurityGate` ledger writer, verifies migration and restart/reboot, and independently confirms authorized receiver HostIdentity, protected anonymous FD receipt, nginx TLS route and revocation/uncertain-delivery behavior. Ingress/broker flags remain false; no real Cloudflare token, DNS/ACME/Certbot, admin password or issuer preparation retry.
 
+## Inactive signer-candidate preparation — existing offline approval only
+
+The module `zog.station_access.credential_v1_offline_signer` provides an **actual narrowly scoped root-only preparation and inspection entrypoint** that does not require or create an operator trust anchor. This is deliberately different from producing an approved Credential Authority. It can propose a distinct Ed25519 signing key for later independent operator review, but cannot sign a root grant, install an authorization, read a Cloudflare token or enable HTTPS.
+
+Its target must be the **existing** root:root 0700 offline directory strictly under `/opt/station-trust/` with basename ending `-offline`. It creates one `credential-v1-signer-candidate/` child root:root 0700 and within it `authority-key.pem` root:root 0600, `authority-ed25519.pub` root:root 0444 and `unapproved-candidate.json` root:root 0600. Every record is written with O_EXCL, O_NOFOLLOW and fsync, under a verified directory descriptor. **Any existing or partially created candidate causes a hard stop**; source never overwrites or deletes a key on retry. Inspect verifies private/public correspondence and the `operator_approval_present=false`, `root_grant_present=false` and `installation_authorized=false` receipt and returns only a public-key SHA-256, never private bytes.
+
+The code is newer than the retained `4966c5a7` offline staged venv. **Work must not attempt these commands using that older installed source.** First source-review this PR #12 head, build and verify its exact wheel/RECORD, and stage it in a separately root-private non-active venv through the already authorized offline process; do not modify active venv or change the original offline stage. The protected installer must independently verify the identity, ownership, DAC, source, startup mode and operator trust origin. Once it approves running this source for **inert offline candidate generation**, the commands are:
+
+```sh
+sudo APPROVED_STAGED_VENV/bin/python -m zog.station_access.credential_v1_offline_signer prepare \
+  --offline-directory /opt/station-trust/credential-v1-4966c5a7-offline \
+  --station-source-commit EXACT_VERIFIED_STAGED_SOURCE_SHA40
+
+sudo APPROVED_STAGED_VENV/bin/python -m zog.station_access.credential_v1_offline_signer inspect \
+  --offline-directory /opt/station-trust/credential-v1-4966c5a7-offline \
+  --station-source-commit EXACT_VERIFIED_STAGED_SOURCE_SHA40
+```
+
+No live service references this directory. Generation is allowed only as an **unapproved proposal** under the retained offline-preparation scope. The operator must still establish a separate, independently authenticated approval key, attest the Command-Center identity as above, and sign the exact narrow grant and canonical authorization-envelope/key endorsement **after** reviewing the resulting distinct public key and its provenance. Do not mistake the signer-candidate receipt for trust evidence, an approved host-install `/state` contract or source/pin installation permission. Its private key remains root-private and may not be exported in the handoff.
+
 ## Required negative tests
 
 Wrong independently expected operator pin; candidate self-signed pin; missing signed attestation; altered grant/identity; wrong Command-Center instance ID, source or DB inode; different owner/permissions, symlink/hardlink and replaced file; enrollment UUID reused as station installation; untrusted certificate signer reused as operator; expiry/revision rollback; host-install canonical `/state` invented from consumer identifiers; operator-approval record absent; staging partial writes; service restart before authority acceptance; no import of real secrets.
