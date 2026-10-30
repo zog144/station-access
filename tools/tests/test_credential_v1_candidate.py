@@ -64,6 +64,24 @@ class CredentialV1CandidateTests(unittest.TestCase):
             with self.subTest(repository=repository), self.assertRaises(ValueError):
                 self.validate(candidate=amended)
 
+    def test_host_install_corrected_immutable_commit_and_parent_are_required(self):
+        host_install = next(entry for entry in self.candidate["additional_candidates"]
+                            if entry["repository"] == "zog144/host-install")
+        self.assertEqual(host_install["candidate_commit"],
+                         "6e8b3792c6bc43e6b55dd254892105f7abea5a29")
+        self.assertEqual(host_install["correction_parent"],
+                         "79ad2b6f72c89acfca998d393664151010db7134")
+        for patch in (
+            {"candidate_commit": host_install["correction_parent"]},
+            {"candidate_commit": "0" * 40},
+            {"correction_parent": "0" * 40},
+        ):
+            with self.subTest(patch=patch), self.assertRaises(ValueError):
+                modified = copy.deepcopy(self.candidate)
+                next(x for x in modified["additional_candidates"]
+                     if x["repository"] == "zog144/host-install").update(patch)
+                self.validate(candidate=modified)
+
     def test_runtime_pin_rollback_and_accepted_manifest_rewrite_rejected(self):
         invalid = copy.deepcopy(self.pyproject)
         invalid["project"]["dependencies"] = [
@@ -82,6 +100,7 @@ class CredentialV1CandidateTests(unittest.TestCase):
         for required in (
             'credential-v1-companion-candidate.json',
             checker.SOURCE,
+            "6e8b3792c6bc43e6b55dd254892105f7abea5a29",
             'host-identify==0.3.5',
             'importlib.metadata.version("host-identify") == "0.3.5"',
             'zog-credential-delivery-envelope-v1'):
