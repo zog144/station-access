@@ -1,0 +1,43 @@
+# station-access — host-identify 0.3.5 dependency correction and protected installation handoff
+
+Date: 2026-10-30. Scope: SOURCE-ONLY dependency preparation stacked on draft station-access PR #11. **No protected authority installation, source publication, operator approval, HTTP listener activation or credential transfer** is performed by this correction.
+
+## Root cause and exact correction
+
+- Prior `station-access/pyproject.toml` declared `host-identify==0.3.4`, and the previously accepted source companion manifest selected `zog144/host-identify@1a5eac0b255c995022db6a3a4c0051efffa748cc` (component version 0.3.4).
+- Canonical HTTPS authority `zog.host_identify.credential_delivery` in draft PR #11 requires version **0.3.5** at full Git source commit **`4a176373ff4cb47a66a8ab1b5fd3d6ff01ff2a3b`**, implementing shared signed request, delivery, installation receipt, cancellation and ledger. The earlier separately pinned interoperability suite installed 0.3.5 and passed, but that did not update station runtime metadata or native installed software.
+- Runtime `pyproject.toml` now requires `host-identify==0.3.5`. A separate `credential-v1-companion-candidate.json` records three exact candidates alongside the unchanged previously accepted `public-companion-pins.json`: host-identify 0.3.5 at `4a176373ff4cb47a66a8ab1b5fd3d6ff01ff2a3b`, host-discover 0.4.13 at `ebe83775e9099fd406f6ad9213a42b25bade5b13`, and **corrected host-install 0.14.3** at `6e8b3792c6bc43e6b55dd254892105f7abea5a29` (direct parent `79ad2b6f72c89acfca998d393664151010db7134`). Older accepted host-discover 0.4.9 requires both host-identify 0.3.4 and host-install 0.10.0, so one-pin replacement would fail dependency closure. The accepted legacy entry and its October 22 evidence are not rewritten or falsely reused.
+- Full Django CI checks out all three exact candidate commits **only for source candidate verification**, verifies source revisions, required versions, `credential_delivery.py`, public license declarations, installed 0.3.5/0.4.13/0.14.3 distribution metadata, compatible direct dependency edges, shared signed protocol schemas and `pip check`. The other seven companions retain their exact previously accepted source commits. The focused canonical interop CI uses and cross-checks the same exact 0.3.5 source candidate.
+- Candidate validation intentionally refuses `rights_acceptance=accepted`, `consumer_acceptance=accepted`, publication approval, native installation approval or real credential-delivery approval. `tools/check-credential-v1-candidate.py` and negative tests stop baseline/pin drift or forged approval. Source CI success remains distinct from operator/native permission.
+
+## Exact next Work handoff (protected authority)
+
+**Stage 0: read-only source reconciliation.** Verify this branch/PR and exact commit, `host-identify@4a176373ff4cb47a66a8ab1b5fd3d6ff01ff2a3b`, the unchanged `public-companion-pins.json` accepted baseline, and separate pending candidate. Independently review all three candidate sources, rights evidence and cross-consumer compatibility before changing the accepted companion manifest or installing source in a privileged runtime. Attest the desired wheel bytes and RECORD against reviewed source. Record explicit operator disposition on source pin adoption.
+
+**Stage 1: protected authority installation preparation only, with separate owner authorization.** After the required source/adoption approval, select the Command-Center Host and exact installation/STATE. Verify independent operator public pin; old certificate-assignment signer pin; **different** Credential Authority v1 public pin and root-private PEM; separately operator-signed narrow grant and domain-separated exact canonical authorization-envelope endorsement. Read back installed file ownership/mode/link/inode, retained signer provenance, signed hostname/managed DNS-01 assignment and owner ledger. No private token read, no nginx route, no systemd socket activation.
+
+**Stage 2: native read-only checks, still no secret.** Confirm installed source/RECORD and the exact host-identify 0.3.5 / host-discover 0.4.13 / **corrected host-install 0.14.3 at 6e8b3792** runtime composition, including C1 CLI/module/distribution version agreement, C2 exact selected disk alias/unique whole disk and root-descendant exclusions, and C3 read-only inherited-WWN regression, private HTTP ingress vs root AF_UNIX broker UID/DAC, independent trust pins, `SecurityGate` SQLite ledger migration `0019`, signature/operation replay and restart/reboot persistence, fail-closed missing/foreign signer or grant, fragmented signed responses, cancellation and credential rotation-required behavior. Run synthetic only.
+
+**Separate Stage 3:** real credential delivery is NOT authorized by the source pin correction or staging. It requires separately accepted root-control/host-install consumer anonymous-FD installation and signed receipt, root file-update synchronization with SecurityGate, deployed HTTPS route approval and an explicit operator GO. Do not enable the old SSH/PR #9 raw-token paths, Certbot, DNS-01/ACME or nginx merely because a source test passes.
+
+## Review outputs requested
+
+Return (nonsecret) the exact source/CI commit and installed host-identify version/record, accepted-base vs candidate-pin status, independent key/authorization fingerprints and grant revision/expiry, ingress/broker installed-byte and DAC checks, STATE ledger and restart/reboot results, consumer contract evidence, blockers and an explicit NO-GO/GO for **preparation** separate from activation. Preserve previous original Host preparation and its history; never reinitialize STATE to resolve dependency mismatch.
+
+
+## Corrected immutable host-install candidate and dependent closure
+
+The original source candidate `host-install@79ad2b6f72c89acfca998d393664151010db7134` was not accepted for installation after source review exposed C1 version drift and C2/C3 target-identity test regressions. The correction is **only** `host-install@6e8b3792c6bc43e6b55dd254892105f7abea5a29` (parent `79ad2b6f…`), still declared as component version `0.14.3`. It is not a release/installation grant.
+
+| Dependent | Exact candidate | Required constraint |
+| --- | --- | --- |
+| station-access | This PR #12 source branch | `host-identify==0.3.5` |
+| host-identify | `4a176373ff4cb47a66a8ab1b5fd3d6ff01ff2a3b` | `0.3.5`, canonical HTTPS v1 |
+| host-discover | `ebe83775e9099fd406f6ad9213a42b25bade5b13` | `0.4.13`; exact `host-identify==0.3.5`, `host-install==0.14.3` |
+| host-install | **`6e8b3792c6bc43e6b55dd254892105f7abea5a29`** | `0.14.3`; pyproject/module/CLI must all agree |
+
+The seven remaining accepted companion source commits are unaffected. Replacing host-install with a newer version merely because it is available would violate the exact host-discover `==0.14.3` dependency. The old accepted `public-companion-pins.json` remains byte-identical; `credential-v1-companion-candidate.json` is the explicit **pending** source closure.
+
+The full Django candidate workflow now checks the corrected Git SHA, three source/module/distribution versions, CLI `--version` and source regression tests for WWN/serial aliases, duplicated identity, running-root exclusion and inherited WWN. These do not authorize formatting a STATE device or altering the original Host.
+
+**Work's next review:** rerun C1, C2 and C3 against exactly `6e8b3792…`, then broader source compatibility/rights, installed wheel RECORD, and native authority preparation checks. The operator must separately approve a reviewed source revision and protected root grant; even a successful source result must not enable a credential endpoint or transfer a token.

@@ -31,6 +31,9 @@ jobs:
       - name: Check namespace and repository layout
         run: python tools/check-python-namespace.py
 
+      - name: Verify canonical HTTPS companion candidate without granting acceptance
+        run: python tools/check-credential-v1-candidate.py
+
       - name: Compile source and source-only tests
         run: python -m compileall -q src tests
 
@@ -98,7 +101,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Require explicitly accepted immutable public companion pins
+      - name: Verify source-only candidate is distinct from accepted publication pins
+        run: python tools/check-credential-v1-candidate.py
+
+      - name: Verify accepted baseline and explicitly pending HTTPS companion candidate
         id: pins
         run: |
           python - <<'PY'
@@ -108,6 +114,30 @@ jobs:
           from pathlib import Path
 
           handoff = json.loads(Path("public-companion-pins.json").read_text())
+          candidate = json.loads(Path("credential-v1-companion-candidate.json").read_text())
+          import subprocess
+          import tomllib
+          original_pin = next(x["commit"] for x in handoff["dependencies"]
+                              if x["repository"] == "zog144/host-identify")
+          runtime = tomllib.loads(Path("pyproject.toml").read_text())
+          if (candidate.get("schema") != "zog-station-credential-v1-companion-candidate-v1"
+                  or candidate.get("status") != "source-candidate-not-accepted"
+                  or candidate.get("repository") != "zog144/host-identify"
+                  or candidate.get("accepted_baseline_commit") != original_pin
+                  or candidate.get("accepted_baseline_manifest") != "public-companion-pins.json"
+                  or candidate.get("candidate_commit") != "4a176373ff4cb47a66a8ab1b5fd3d6ff01ff2a3b"
+                  or candidate.get("candidate_component_version") != "0.3.5"
+                  or candidate.get("canonical_module") != "zog.host_identify.credential_delivery"
+                  or candidate.get("rights_acceptance") != "pending-independent-review"
+                  or candidate.get("consumer_acceptance") != "pending-independent-review"
+                  or candidate.get("native_installation_approval") != "not-authorized"
+                  or "host-identify==0.3.5" not in runtime["project"]["dependencies"]):
+              raise SystemExit("Host-identify source candidate is not exact or is unexpectedly approved")
+          observed_manifest = subprocess.check_output(
+              ["git", "hash-object", "public-companion-pins.json"], text=True).strip()
+          if observed_manifest != candidate["accepted_baseline_manifest_blob"]:
+              raise SystemExit("Previously accepted companion pin manifest was modified")
+          print("SOURCE CANDIDATE ONLY: host-identify 0.3.5; original accepted evidence unchanged")
           if (handoff.get("schema") != "zog-station-public-companion-pins-v1" or
                   handoff.get("status") != "accepted"):
               raise SystemExit("Public companion pins lack explicit source and compatibility acceptance")
@@ -128,9 +158,14 @@ jobs:
               raise SystemExit(f"Companion repository set differs: {sorted(set(pinned) ^ set(expected))}")
           if not all(re.fullmatch(r"[0-9a-f]{40}", sha) for sha in pinned.values()):
               raise SystemExit("Every companion pin must be a full immutable Git commit")
+          candidate_overrides = {
+              candidate["repository"]: candidate["candidate_commit"],
+              **{item["repository"]: item["candidate_commit"]
+                 for item in candidate["additional_candidates"]},
+          }
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as outputs:
               for repository, label in expected.items():
-                  print(f"{label}={pinned[repository]}", file=outputs)
+                  print(f"{label}={candidate_overrides.get(repository, pinned[repository])}", file=outputs)
           PY
 
 
@@ -214,20 +249,61 @@ jobs:
           path: dependencies/zog144/host-deploy
           persist-credentials: false
 
-      - name: Verify checked-out companion identities
+      - name: Read back accepted companion sources and exact pending HTTPS candidate
         run: |
           python - <<'PY'
           import json
           import subprocess
           from pathlib import Path
           handoff = json.loads(Path("public-companion-pins.json").read_text())
+          candidate = json.loads(Path("credential-v1-companion-candidate.json").read_text())
+          overrides = {
+              candidate["repository"]: candidate["candidate_commit"],
+              **{item["repository"]: item["candidate_commit"]
+                 for item in candidate["additional_candidates"]},
+          }
           for item in handoff["dependencies"]:
               name = item["repository"]
               path = Path("dependencies") / name
               observed = subprocess.check_output(["git", "-C", str(path), "rev-parse", "HEAD"], text=True).strip()
-              if observed != item["commit"]:
-                  raise SystemExit(f"Mismatch in {name}: expected {item['commit']}, observed {observed}")
-              print(f"{name}: {observed}")
+              expected = overrides.get(name, item["commit"])
+              if observed != expected:
+                  raise SystemExit(f"Mismatch in {name}: expected {expected}, observed {observed}")
+              print(f"{name}: {observed}" + (" (unaccepted HTTPS candidate)" if name in overrides else ""))
+          host_source = Path("dependencies/zog144/host-identify")
+          if '__version__ = "0.3.5"' not in (host_source / "src/zog/host_identify/__init__.py").read_text():
+              raise SystemExit("host-identify source version is not 0.3.5")
+          if not (host_source / "src/zog/host_identify/credential_delivery.py").is_file():
+              raise SystemExit("Canonical HTTPS credential protocol module absent")
+          if "BSD-3-Clause OR GPL-3.0-only" not in (host_source / "LICENSE").read_text():
+              raise SystemExit("host-identify license grant absent")
+          discovery_source = Path("dependencies/zog144/host-discover")
+          install_source = Path("dependencies/zog144/host-install")
+          def verify_metadata(path, version, required):
+              import tomllib
+              data = tomllib.loads((path / "pyproject.toml").read_text())
+              if data["project"]["version"] != version:
+                  raise SystemExit(f"{path} component version is not {version}")
+              if not set(required) <= set(data["project"].get("dependencies", [])):
+                  raise SystemExit(f"{path} required compatible dependencies not met")
+              if "BSD-3-Clause OR GPL-3.0-only" not in (path / "LICENSE").read_text():
+                  raise SystemExit(f"{path} missing public first-party license declaration")
+          verify_metadata(discovery_source, "0.4.13", [
+              "host-identify==0.3.5", "host-install==0.14.3"])
+          verify_metadata(install_source, "0.14.3", [])
+          if (candidate["additional_candidates"][1]["candidate_commit"] !=
+                  "6e8b3792c6bc43e6b55dd254892105f7abea5a29"
+                  or candidate["additional_candidates"][1]["correction_parent"] !=
+                  "79ad2b6f72c89acfca998d393664151010db7134"):
+              raise SystemExit("Host-install corrected immutable candidate has drifted")
+          module_source = (install_source / "src/zog/host_install/__init__.py").read_text()
+          cli_source = (install_source / "src/zog/host_install/cli.py").read_text()
+          if ('__version__ = "0.14.3"' not in module_source
+                  or 'from . import InstallError, __version__' not in cli_source
+                  or 'version=f"%(prog)s {__version__}"' not in cli_source):
+              raise SystemExit("Corrected host-install source/module/CLI version mismatch")
+          if not (install_source / "tests/test_version_contract.py").is_file():
+              raise SystemExit("Corrected version regression suite absent")
           PY
 
       - name: Install pinned third-party and Zog components
@@ -247,6 +323,33 @@ jobs:
           python -m pip install --no-deps -e dependencies/zog144/host-deploy
           python -m pip install --no-deps -e .
           python -m pip check
+          python - <<'PY'
+          import importlib.metadata
+          from zog.host_identify import credential_delivery
+          assert importlib.metadata.version("host-identify") == "0.3.5"
+          assert importlib.metadata.version("host-discover") == "0.4.13"
+          assert importlib.metadata.version("host-install") == "0.14.3"
+          assert credential_delivery.REQUEST_SCHEMA == "zog-credential-request-v1"
+          assert credential_delivery.DELIVERY_ENVELOPE_SCHEMA == "zog-credential-delivery-envelope-v1"
+          assert credential_delivery.RECEIPT_SCHEMA == "zog-credential-installation-receipt-v1"
+          PY
+
+      - name: Exercise corrected host-install 0.14.3 C1/C2/C3 source regressions
+        run: |
+          python -m unittest discover -s dependencies/zog144/host-install/tests -p test_version_contract.py -v
+          PYTHONPATH=dependencies/zog144/host-install/tests python -m unittest -v \
+            test_state_device.PlanTests.test_aws_ebs_serial_and_wwn_aliases_resolve_one_whole_disk \
+            test_state_device.PlanTests.test_aws_ebs_alias_mismatch_missing_and_duplicate_whole_disks_fail \
+            test_state_device.PlanTests.test_child_partition_inherited_wwn_does_not_ambiguate_retry \
+            test_state_device.PlanTests.test_aws_provider_binding_cannot_select_running_root
+          python - <<'PY'
+          import subprocess
+          from zog.host_install import __version__
+          assert __version__ == "0.14.3"
+          result = subprocess.run(["host-install", "--version"], check=True,
+                                  capture_output=True, text=True)
+          assert result.stdout.strip() == "host-install 0.14.3"
+          PY
 
       - name: Verify actual imported Zog components
         run: |
