@@ -48,6 +48,22 @@ class CredentialV1CandidateTests(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 self.validate(candidate=change)
 
+    def test_incompatible_host_discover_and_host_install_candidate_rejected(self):
+        for repository, bad_version in (
+            ("zog144/host-discover", "0.4.9"),
+            ("zog144/host-install", "0.10.0")):
+            amended = copy.deepcopy(self.candidate)
+            next(x for x in amended["additional_candidates"]
+                 if x["repository"] == repository)["candidate_component_version"] = bad_version
+            with self.subTest(repository=repository), self.assertRaises(ValueError):
+                self.validate(candidate=amended)
+        for repository in ("zog144/host-discover", "zog144/host-install"):
+            amended = copy.deepcopy(self.candidate)
+            next(x for x in amended["additional_candidates"]
+                 if x["repository"] == repository)["rights_acceptance"] = "accepted"
+            with self.subTest(repository=repository), self.assertRaises(ValueError):
+                self.validate(candidate=amended)
+
     def test_runtime_pin_rollback_and_accepted_manifest_rewrite_rejected(self):
         invalid = copy.deepcopy(self.pyproject)
         invalid["project"]["dependencies"] = [
