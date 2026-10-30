@@ -340,6 +340,7 @@ class HttpsCredentialV1Ledger(models.Model):
     host_id = models.UUIDField(db_index=True)
     credential_id = models.CharField(max_length=63)
     authorization_id = models.UUIDField()
+    authorization_sha256 = models.CharField(max_length=64)
     state = models.JSONField()
     updated_at = models.DateTimeField(auto_now=True)
 
