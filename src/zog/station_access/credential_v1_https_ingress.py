@@ -101,8 +101,6 @@ def _consume_broker_reply(connection, route):
     if response != b"A":
         _deny()
     return 204, b""
-    finally:
-        connection.close()
 
 
 def application(environ, start_response):
