@@ -12,7 +12,7 @@ license = "BSD-3-Clause OR GPL-3.0-only"
 license-files = ["LICENSE", "LICENSES/*.txt", "THIRD-PARTY-NOTICES.md"]
 requires-python = ">=3.12"
 dependencies = [
-  "host-identify==0.3.4",
+  "host-identify==0.3.5",
   "archive-mirror==0.4.2",
   "network-register[dns]==0.12.0",
   "Django>=5.2,<5.3",
