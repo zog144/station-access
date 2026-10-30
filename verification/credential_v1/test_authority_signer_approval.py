@@ -93,6 +93,7 @@ def test_canonical_authority_loader_verifies_distinct_key_and_operator_signature
         "registry_id": auth["registry_id"],
         "revision": auth["revision"],
         "credential_revision": auth["credential_revision"],
+        "state": "approved",
         "expires_at": auth["expires_at"] + 1800,
     }
     endorsement = {
