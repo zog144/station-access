@@ -128,10 +128,10 @@ def test_canonical_authority_loader_verifies_distinct_key_and_operator_signature
             HOST_CREDENTIAL_V1_AUTHORIZATION_FILE="/root/v1-envelope",
             HOST_CREDENTIAL_V1_AUTHORITY_APPROVAL_FILE="/root/v1-endorsement",
             HOST_CREDENTIAL_HTTPS_OPERATOR_PIN_FILE="/root/operator-pin",
-            HOST_CREDENTIAL_HTTPS_SIGNER_PIN_FILE="/root/station-pin"), \\
-         patch.object(authority.legacy, "_authority", return_value=grant), \\
+            HOST_CREDENTIAL_HTTPS_SIGNER_PIN_FILE="/root/station-pin"), \
+         patch.object(authority.legacy, "_authority", return_value=grant), \
          patch.object(authority.legacy, "_projection",
-                      return_value={"authorization":{"credential_id":selected_id}}), \\
+                      return_value={"authorization":{"credential_id":selected_id}}), \
          patch.object(authority.legacy, "_protected", side_effect=read_protected):
         confirmed_grant, confirmed_auth, confirmed_signer = (
             authority._identity_and_authorization())
