@@ -66,23 +66,41 @@ def relay(route, raw, headers, *, path):
             _deny()
         connection.sendall(frame)
         connection.shutdown(socket.SHUT_WR)
-        response = connection.recv(MAX_RESPONSE+2)
-        if not response or len(response) > MAX_RESPONSE+1:
+        return _consume_broker_reply(connection, route)
+    finally:
+        connection.close()
+
+
+def _consume_broker_reply(connection, route):
+    # AF_UNIX SOCK_STREAM is a byte stream, not a record transport. A single
+    # recv() may contain only a prefix of a signed delivery. Read until EOF
+    # with a strict total bound; truncated or oversized replies fail closed.
+    chunks = bytearray()
+    while len(chunks) <= MAX_RESPONSE:
+        part = connection.recv(MAX_RESPONSE + 1 - len(chunks))
+        if not part:
+            break
+        chunks.extend(part)
+    if not chunks or len(chunks) > MAX_RESPONSE:
+        _deny()
+    response = bytes(chunks)
+    if route == PATH:
+        if not response.startswith(b"J"):
             _deny()
-        if connection.recv(1):
-            _deny()
-        if route == PATH:
-            if not response.startswith(b"J"):
-                _deny()
-            body = response[1:]
+        body = response[1:]
+        try:
             result = json.loads(body)
-            if (type(result) is not dict or
-                    result.get("schema") != "zog-credential-delivery-envelope-v1"):
+            if (type(result) is not dict
+                    or result.get("schema") != "zog-credential-delivery-envelope-v1"
+                    or json.dumps(result, sort_keys=True, separators=(",", ":"),
+                                  ensure_ascii=True).encode("ascii") != body):
                 _deny()
-            return 200, body
-        if response != b"A":
+        except (ValueError, TypeError, UnicodeError):
             _deny()
-        return 204, b""
+        return 200, body
+    if response != b"A":
+        _deny()
+    return 204, b""
     finally:
         connection.close()
 
