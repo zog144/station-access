@@ -119,6 +119,8 @@ def delivery_commit(*, auth, request_id, value, signing_key, now):
         if operation.delivery_metadata:
             raise ValueError("delivery-already-committed")
         request = operation.request
+        if request["expires_at"] <= now or request["created_at"] > now + cd.CLOCK_SKEW:
+            raise ValueError("request-expired-before-delivery")
         signed, delivered = wire.delivery_record(
             current, value, request, auth, signing_key, now=now)
         # Only necessary receipt-correlation metadata, NEVER value['secret'].
