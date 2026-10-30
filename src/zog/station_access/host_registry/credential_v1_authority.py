@@ -121,6 +121,11 @@ def _current(grant, auth):
             or session.registry_id != grant["registry_id"]
             or str(session.authority_id) != grant["authority_id"]
             or type(session.claims) is not dict
+            or session.claims.get("fingerprint") != grant["fingerprint"]
+            or session.claims.get("installation_id") != grant["installation_id"]
+            or session.claims.get("registry_id") != grant["registry_id"]
+            or type(session.claims.get("jti")) is not str
+            or not session.claims["jti"]
             or session.claims.get("exp", 0) <= time.time()):
         deny()
     return signatures.public_key(known.public_key)
