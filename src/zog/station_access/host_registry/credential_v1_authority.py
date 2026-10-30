@@ -40,9 +40,8 @@ def _enabled():
 def _signer(grant):
     # Operator-signed root grant separately binds the pinned station key.
     pin = legacy._protected(getattr(
-        settings, "HOST_CREDENTIAL_HTTPS_SIGNER_PIN_FILE", ""), 0o444)
-    if len(pin) != 32 or hashlib.sha256(pin).hexdigest() != grant[
-            "independent_signer_pin_sha256"]:
+        settings, "HOST_CREDENTIAL_V1_SIGNER_PIN_FILE", ""), 0o444)
+    if len(pin) != 32:
         deny()
     raw = legacy._protected(getattr(
         settings, "HOST_CREDENTIAL_V1_SIGNING_KEY_FILE", ""), 0o600)
@@ -59,9 +58,10 @@ def _signer(grant):
 def _identity_and_authorization(*, permit_revoked=False):
     grant = legacy._authority(allow_revoked=permit_revoked)
     key = _signer(grant)
-    signed = json.loads(legacy._protected(getattr(
-        settings, "HOST_CREDENTIAL_V1_AUTHORIZATION_FILE", ""), 0o600))
-    if type(signed) is not dict:
+    raw_envelope = legacy._protected(getattr(
+        settings, "HOST_CREDENTIAL_V1_AUTHORIZATION_FILE", ""), 0o600)
+    signed = json.loads(raw_envelope)
+    if type(signed) is not dict or cd.canonical(signed) != raw_envelope:
         deny()
     origin = signatures.origin(settings.HOST_IDENTITY_ORIGIN)
     # A different UUID in canonical authorization is intentional: it is
@@ -78,6 +78,10 @@ def _identity_and_authorization(*, permit_revoked=False):
     auth = cd.verify_authorization(
         signed, key.public_key(), expected_issuer=origin,
         expected_binding=expected)
+    from .credential_v1_signer_approval import verify as verify_operator
+    pin = key.public_key().public_bytes(
+        serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    verify_operator(grant, raw_envelope, pin, auth)
     if (auth["revision"] != grant["revision"]
             or auth["credential_revision"] != grant["credential_revision"]
             or ((auth["status"] == "revoked") != (grant["state"] == "revoked"))
