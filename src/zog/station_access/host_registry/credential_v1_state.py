@@ -81,6 +81,8 @@ def request_admit(*, auth, url, headers, body, host_key, origin, now=None):
     from zog.station_access import credential_https_interop as wire
     if type(body) is not bytes or len(body) > cd.MAX_BODY:
         raise ValueError("invalid-request")
+    # Require one canonical wire byte sequence; disallow duplicate JSON keys.
+    _operation_id(body, cd.REQUEST_SCHEMA)
     with locked():
         row, state = _ledger(auth)
         request, nonce, expiry, pending = wire.request_admit(
