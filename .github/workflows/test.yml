@@ -284,7 +284,7 @@ jobs:
               data = tomllib.loads((path / "pyproject.toml").read_text())
               if data["project"]["version"] != version:
                   raise SystemExit(f"{path} component version is not {version}")
-              if not set(required) <= set(data["project"]["dependencies"]):
+              if not set(required) <= set(data["project"].get("dependencies", [])):
                   raise SystemExit(f"{path} required compatible dependencies not met")
               if "BSD-3-Clause OR GPL-3.0-only" not in (path / "LICENSE").read_text():
                   raise SystemExit(f"{path} missing public first-party license declaration")
