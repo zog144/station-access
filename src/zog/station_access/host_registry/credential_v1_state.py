@@ -106,7 +106,8 @@ def request_admit(*, auth, url, headers, body, host_key, origin, now=None):
         return request["request_id"]
 
 
-def delivery_commit(*, auth, request_id, value, signing_key, now):
+def delivery_commit(*, auth, request_id, value, signing_key, now,
+                    before_commit=None):
     """Sign and mark delivered BEFORE caller emits the signed response bytes.
 
     A failed send is permanently ambiguous until explicit signed cancellation;
@@ -126,6 +127,8 @@ def delivery_commit(*, auth, request_id, value, signing_key, now):
         request = operation.request
         if request["expires_at"] <= now or request["created_at"] > now + cd.CLOCK_SKEW:
             raise ValueError("request-expired-before-delivery")
+        if before_commit is not None:
+            before_commit()
         signed, delivered = wire.delivery_record(
             current, value, request, auth, signing_key, now=now)
         # Only necessary receipt-correlation metadata, NEVER value['secret'].
