@@ -156,3 +156,33 @@ def test_same_revision_authority_envelope_change_is_rejected():
     # A newer signed revision is accepted by the shared state machine.
     advanced = dict(changed, revision=3)
     assert service.reconcile_authorization(advanced) == ("approved", 3)
+
+
+def test_root_broker_signs_delivery_and_accepts_receipt_only_after_commit():
+    import os
+    from unittest.mock import patch
+    from django.test import override_settings
+    from zog.station_access.host_registry import credential_v1_authority as server
+    from zog.station_access.host_registry.models import HttpsCredentialV1Ledger
+    service, key, signing_key, now, auth, request, delivery = setup()
+    grant = {"authorization_id": "a"*64}
+    signed_req = send(key, request, V["request_path"], "G"*24)
+    synthetic = b"SYNTHETIC_TEST_ONLY_TOKEN"
+    with override_settings(
+            HOST_CREDENTIAL_V1_BROKER_ENABLED=True,
+            HOST_CREDENTIAL_V1_LIVE_ENABLED=True), \
+         patch.object(server.os, "geteuid", return_value=0), \
+         patch.object(server, "_context",
+                      return_value=(grant, auth, signing_key, key.public_key())), \
+         patch.object(server.legacy, "_read_local_token",
+                      return_value=synthetic):
+        status, data = server.handle(
+            V["request_path"],
+            dict(signed_req.headers), signed_req.body)
+        assert status == 200
+        proof = json.loads(data)
+        assert cd.verify_delivery(
+            proof, signing_key.public_key(), request, auth)["request_id"] == request["request_id"]
+        assert proof["delivery"]["secret"] == __import__("base64").b64encode(synthetic).decode()
+        assert HttpsCredentialV1Ledger.objects.get().state["requests"][-1]["status"] == "delivered"
+        assert synthetic.decode() not in json.dumps(HttpsCredentialV1Ledger.objects.get().state)
