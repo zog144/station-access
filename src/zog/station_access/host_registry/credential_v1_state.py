@@ -29,6 +29,7 @@ def _subject(auth):
 
 def _ledger(auth):
     cd = _common()
+    digest = cd.digest(auth)
     key = _subject(auth)
     row = HttpsCredentialV1Ledger.objects.filter(pk=key).first()
     if row is None:
@@ -38,6 +39,9 @@ def _ledger(auth):
             or str(row.authorization_id) != auth["authorization_id"]):
         raise ValueError("credential-authorization-changed")
     cd.validate_ledger(row.state)
+    if (auth["revision"] == row.state["authorization_revision"]
+            and row.authorization_sha256 != digest):
+        raise ValueError("same-revision-authorization-substituted")
     return row, cd.advance_authorization(row.state, auth)
 
 
@@ -50,9 +54,10 @@ def _save(row, auth, state):
             host_id=uuid.UUID(auth["host_id"]),
             credential_id=auth["credential_id"],
             authorization_id=uuid.UUID(auth["authorization_id"]),
-            state=state)
+            authorization_sha256=cd.digest(auth), state=state)
     else:
         row.state = state
+        row.authorization_sha256 = cd.digest(auth)
     row.save()
     return row
 
