@@ -69,8 +69,9 @@ def verify(grant, envelope_bytes, signer_public, authorization):
             settings, "HOST_CREDENTIAL_HTTPS_OPERATOR_PIN_FILE", ""), 0o444)
         station_pin = protected._protected(getattr(
             settings, "HOST_CREDENTIAL_HTTPS_SIGNER_PIN_FILE", ""), 0o444)
-        if len(pin) != 32 or len(station_pin) != 32 or hmac.compare_digest(
-                station_pin, signer_public):
+        if (len(pin) != 32 or len(station_pin) != 32
+                or hmac.compare_digest(station_pin, signer_public)
+                or hmac.compare_digest(pin, signer_public)):
             deny()
         Ed25519PublicKey.from_public_bytes(pin).verify(
             proof, SCHEMA.encode("ascii") + bytes([0]) + cd.canonical(unsigned))
