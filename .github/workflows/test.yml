@@ -98,7 +98,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Require explicitly accepted immutable public companion pins
+      - name: Verify accepted baseline and explicitly pending HTTPS companion candidate
         id: pins
         run: |
           python - <<'PY'
@@ -108,6 +108,30 @@ jobs:
           from pathlib import Path
 
           handoff = json.loads(Path("public-companion-pins.json").read_text())
+          candidate = json.loads(Path("credential-v1-companion-candidate.json").read_text())
+          import subprocess
+          import tomllib
+          original_pin = next(x["commit"] for x in handoff["dependencies"]
+                              if x["repository"] == "zog144/host-identify")
+          runtime = tomllib.loads(Path("pyproject.toml").read_text())
+          if (candidate.get("schema") != "zog-station-credential-v1-companion-candidate-v1"
+                  or candidate.get("status") != "source-candidate-not-accepted"
+                  or candidate.get("repository") != "zog144/host-identify"
+                  or candidate.get("accepted_baseline_commit") != original_pin
+                  or candidate.get("accepted_baseline_manifest") != "public-companion-pins.json"
+                  or candidate.get("candidate_commit") != "4a176373ff4cb47a66a8ab1b5fd3d6ff01ff2a3b"
+                  or candidate.get("candidate_component_version") != "0.3.5"
+                  or candidate.get("canonical_module") != "zog.host_identify.credential_delivery"
+                  or candidate.get("rights_acceptance") != "pending-independent-review"
+                  or candidate.get("consumer_acceptance") != "pending-independent-review"
+                  or candidate.get("native_installation_approval") != "not-authorized"
+                  or "host-identify==0.3.5" not in runtime["project"]["dependencies"]):
+              raise SystemExit("Host-identify source candidate is not exact or is unexpectedly approved")
+          observed_manifest = subprocess.check_output(
+              ["git", "hash-object", "public-companion-pins.json"], text=True).strip()
+          if observed_manifest != candidate["accepted_baseline_manifest_blob"]:
+              raise SystemExit("Previously accepted companion pin manifest was modified")
+          print("SOURCE CANDIDATE ONLY: host-identify 0.3.5; original accepted evidence unchanged")
           if (handoff.get("schema") != "zog-station-public-companion-pins-v1" or
                   handoff.get("status") != "accepted"):
               raise SystemExit("Public companion pins lack explicit source and compatibility acceptance")
@@ -130,7 +154,9 @@ jobs:
               raise SystemExit("Every companion pin must be a full immutable Git commit")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as outputs:
               for repository, label in expected.items():
-                  print(f"{label}={pinned[repository]}", file=outputs)
+                  selection = (candidate["candidate_commit"]
+                               if repository == "zog144/host-identify" else pinned[repository])
+                  print(f"{label}={selection}", file=outputs)
           PY
 
 
@@ -214,20 +240,30 @@ jobs:
           path: dependencies/zog144/host-deploy
           persist-credentials: false
 
-      - name: Verify checked-out companion identities
+      - name: Read back accepted companion sources and exact pending HTTPS candidate
         run: |
           python - <<'PY'
           import json
           import subprocess
           from pathlib import Path
           handoff = json.loads(Path("public-companion-pins.json").read_text())
+          candidate = json.loads(Path("credential-v1-companion-candidate.json").read_text())
           for item in handoff["dependencies"]:
               name = item["repository"]
               path = Path("dependencies") / name
               observed = subprocess.check_output(["git", "-C", str(path), "rev-parse", "HEAD"], text=True).strip()
-              if observed != item["commit"]:
-                  raise SystemExit(f"Mismatch in {name}: expected {item['commit']}, observed {observed}")
-              print(f"{name}: {observed}")
+              expected = (candidate["candidate_commit"]
+                          if name == "zog144/host-identify" else item["commit"])
+              if observed != expected:
+                  raise SystemExit(f"Mismatch in {name}: expected {expected}, observed {observed}")
+              print(f"{name}: {observed}" + (" (unaccepted HTTPS candidate)" if name == "zog144/host-identify" else ""))
+          host_source = Path("dependencies/zog144/host-identify")
+          if '__version__ = "0.3.5"' not in (host_source / "src/zog/host_identify/__init__.py").read_text():
+              raise SystemExit("host-identify source version is not 0.3.5")
+          if not (host_source / "src/zog/host_identify/credential_delivery.py").is_file():
+              raise SystemExit("Canonical HTTPS credential protocol module absent")
+          if "BSD-3-Clause OR GPL-3.0-only" not in (host_source / "LICENSE").read_text():
+              raise SystemExit("host-identify license grant absent")
           PY
 
       - name: Install pinned third-party and Zog components
@@ -247,6 +283,14 @@ jobs:
           python -m pip install --no-deps -e dependencies/zog144/host-deploy
           python -m pip install --no-deps -e .
           python -m pip check
+          python - <<'PY'
+          import importlib.metadata
+          from zog.host_identify import credential_delivery
+          assert importlib.metadata.version("host-identify") == "0.3.5"
+          assert credential_delivery.REQUEST_SCHEMA == "zog-credential-request-v1"
+          assert credential_delivery.DELIVERY_ENVELOPE_SCHEMA == "zog-credential-delivery-envelope-v1"
+          assert credential_delivery.RECEIPT_SCHEMA == "zog-credential-installation-receipt-v1"
+          PY
 
       - name: Verify actual imported Zog components
         run: |
