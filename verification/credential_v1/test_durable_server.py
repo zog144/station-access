@@ -132,3 +132,16 @@ def test_canonical_wsgi_remains_disabled_and_browser_routes_are_denied():
         assert b"".join(ingress.application(
             environ, lambda status, hdrs: headers.append(status))) == b""
         assert headers[-1] == "403 Forbidden"
+
+
+def test_expired_pending_request_cannot_be_signed_later():
+    service, key, signing_key, now, auth, request, delivery = setup()
+    original = send(key, request, V["request_path"], "F"*24)
+    service.request_admit(
+        auth=auth, url=original.url, headers=dict(original.headers),
+        body=original.body, host_key=key.public_key(), origin=V["origin"],
+        now=now)
+    with pytest.raises(ValueError, match="request-expired"):
+        service.delivery_commit(
+            auth=auth, request_id=request["request_id"], value=delivery,
+            signing_key=signing_key, now=now+61)
