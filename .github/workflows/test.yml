@@ -291,6 +291,19 @@ jobs:
           verify_metadata(discovery_source, "0.4.13", [
               "host-identify==0.3.5", "host-install==0.14.3"])
           verify_metadata(install_source, "0.14.3", [])
+          if (candidate["additional_candidates"][1]["candidate_commit"] !=
+                  "6e8b3792c6bc43e6b55dd254892105f7abea5a29"
+                  or candidate["additional_candidates"][1]["correction_parent"] !=
+                  "79ad2b6f72c89acfca998d393664151010db7134"):
+              raise SystemExit("Host-install corrected immutable candidate has drifted")
+          module_source = (install_source / "src/zog/host_install/__init__.py").read_text()
+          cli_source = (install_source / "src/zog/host_install/cli.py").read_text()
+          if ('__version__ = "0.14.3"' not in module_source
+                  or 'from . import InstallError, __version__' not in cli_source
+                  or 'version=f"%(prog)s {__version__}"' not in cli_source):
+              raise SystemExit("Corrected host-install source/module/CLI version mismatch")
+          if not (install_source / "tests/test_version_contract.py").is_file():
+              raise SystemExit("Corrected version regression suite absent")
           PY
 
       - name: Install pinned third-party and Zog components
@@ -319,6 +332,19 @@ jobs:
           assert credential_delivery.REQUEST_SCHEMA == "zog-credential-request-v1"
           assert credential_delivery.DELIVERY_ENVELOPE_SCHEMA == "zog-credential-delivery-envelope-v1"
           assert credential_delivery.RECEIPT_SCHEMA == "zog-credential-installation-receipt-v1"
+          PY
+
+      - name: Exercise corrected host-install 0.14.3 C1/C2/C3 source regressions
+        run: |
+          python -m unittest discover -s dependencies/zog144/host-install/tests -p test_version_contract.py -v
+          PYTHONPATH=dependencies/zog144/host-install/tests python -m unittest -v             test_state_device.PlanTests.test_aws_ebs_serial_and_wwn_aliases_resolve_one_whole_disk             test_state_device.PlanTests.test_aws_ebs_alias_mismatch_missing_and_duplicate_whole_disks_fail             test_state_device.PlanTests.test_child_partition_inherited_wwn_does_not_ambiguate_retry             test_state_device.PlanTests.test_aws_provider_binding_cannot_select_running_root
+          python - <<'PY'
+          import subprocess
+          from zog.host_install import __version__
+          assert __version__ == "0.14.3"
+          result = subprocess.run(["host-install", "--version"], check=True,
+                                  capture_output=True, text=True)
+          assert result.stdout.strip() == "host-install 0.14.3"
           PY
 
       - name: Verify actual imported Zog components
