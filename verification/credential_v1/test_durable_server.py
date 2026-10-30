@@ -145,3 +145,14 @@ def test_expired_pending_request_cannot_be_signed_later():
         service.delivery_commit(
             auth=auth, request_id=request["request_id"], value=delivery,
             signing_key=signing_key, now=now+61)
+
+
+def test_same_revision_authority_envelope_change_is_rejected():
+    service, key, signing_key, now, auth, request, delivery = setup()
+    assert service.reconcile_authorization(auth) == ("approved", 2)
+    changed = dict(auth, expires_at=auth["expires_at"] + 60)
+    with pytest.raises(ValueError, match="same-revision-authorization-substituted"):
+        service.reconcile_authorization(changed)
+    # A newer signed revision is accepted by the shared state machine.
+    advanced = dict(changed, revision=3)
+    assert service.reconcile_authorization(advanced) == ("approved", 3)
