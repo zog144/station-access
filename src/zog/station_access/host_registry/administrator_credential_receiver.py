@@ -45,6 +45,7 @@ POLICY_FIELDS = frozenset({
     "expires_at", "operator_signature",
 })
 _HEX = re.compile(r"[0-9a-f]{64}\Z")
+_ACCOUNT_REVISION = re.compile(r"[0-9a-f]{40}\Z")
 
 
 class ProtectedAdminCredentialDenied(ValueError):
