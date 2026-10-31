@@ -116,7 +116,7 @@ def _approval(raw, operator_pin, authorization_raw, authority_pin, now):
             or type(value["username"]) is not str or not value["username"]
             or len(value["username"]) > 150
             or type(value["expected_account_revision"]) is not str
-            or not _HEX.fullmatch(value["expected_account_revision"])
+            or not _ACCOUNT_REVISION.fullmatch(value["expected_account_revision"])
             or type(value["credential_revision"]) is not int
             or value["credential_revision"] <= 0
             or type(value["authorization_revision"]) is not int
