@@ -98,7 +98,7 @@ class AdministratorCredentialReceiverTests(TestCase):
             "created_at": self.now, "expires_at": self.now + 120,
         }
         signed_request = cd.prepare_request(
-            ORIGIN + PATH, request, auth, self.host_key, now=self.now, nonce="F" + uuid.uuid4().hex[:23])
+            ORIGIN + PATH, request, auth, self.host_key, nonce="F" + uuid.uuid4().hex[:23])
         delivery = {
             "schema": cd.DELIVERY_SCHEMA, "request_id": request["request_id"],
             "delivery_id": str(uuid.uuid4()), "authorization_id": auth["authorization_id"],
