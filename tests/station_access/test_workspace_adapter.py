@@ -264,3 +264,87 @@ class WorkspaceAdapterTests(TestCase):
         with patch.object(self.gateway, 'get_current_runtime', return_value=replace(runtime, state="terminated", cleanup_pending=True)):
             data = self.client.get(self.status_url()).json()
         assert data['cleanup_pending'] is True and data['desktop'] != 'ready'
+
+
+    def test_first_desktop_unverified_x11_or_rfb_blocks_novnc_and_recovers_without_relaunch(self):
+        """A running process is not yet an authenticated X11 + private RFB server."""
+        from zog.station_access.services.vnc import VncUnavailableError
+        from zog.station_access.services.controller_workspaces import access
+        with patch.object(
+                self.gateway, 'workspace_desktop_access',
+                side_effect=WorkspaceOperationError('desktop X11 authentication denied')):
+            with self.assertRaisesMessage(WorkspaceOperationError, 'authentication denied'):
+                self.ready()
+        self.workspace.refresh_from_db()
+        assert self.workspace.controller_schema == 'zog-workspace-v1'
+        assert self.workspace.runtime_id and not self.workspace.launch_pending
+        assert self.workspace.desired_running and not self.workspace.endpoint_ready
+        original_runtime, original_request = self.workspace.runtime_id, self.workspace.launch_request_id
+        with self.assertRaises(VncUnavailableError):
+            issue_vnc_grant(self.user, self.workspace, self.gateway)
+        assert len(self.transport.started) == 1
+        recovered = self.ready()
+        assert recovered.runtime_id == original_runtime
+        assert self.workspace.launch_request_id == original_request
+        assert len(self.transport.started) == 1
+        grant = issue_vnc_grant(self.user, self.workspace, self.gateway)
+        assert resolve_vnc_target(grant.token, self.gateway) == (
+            'unix_socket', '/run/zog/test/vnc.sock')
+
+    def test_first_workspace_stale_or_untrusted_private_rfb_endpoint_never_grants(self):
+        """The browser receives a token only for one exact controller-owned endpoint."""
+        from zog.station_access.services.vnc import VncUnavailableError
+        self.ready()
+        accepted = self.gateway.workspace_desktop_access(str(self.workspace.pk))
+        grant = issue_vnc_grant(self.user, self.workspace, self.gateway)
+        malformed = [
+            dict(accepted, schema='legacy-vnc'),
+            dict(accepted, workspace_id=str(uuid4())),
+            dict(accepted, desktop_runtime_id='other-runtime'),
+            dict(accepted, ready=False),
+            dict(accepted, vnc_endpoint=dict(kind='tcp', path='127.0.0.1:5900', browser_direct=False)),
+            dict(accepted, vnc_endpoint=dict(kind='unix', path='/run/zog/test/vnc.sock', browser_direct=True)),
+            dict(accepted, vnc_endpoint=dict(kind='unix', path='relative.sock', browser_direct=False)),
+            dict(accepted, vnc_endpoint=dict(kind='unix', path='/run/zog/../foreign.sock', browser_direct=False)),
+            dict(accepted, vnc_endpoint=dict(kind='unix', path='/run/zog/foreign\x00.sock', browser_direct=False)),
+            dict(accepted, vnc_endpoint=dict(kind='unix', path='/' + 's' * 108, browser_direct=False)),
+        ]
+        for value in malformed:
+            with self.subTest(value=value):
+                with patch.object(self.gateway, 'workspace_desktop_access', return_value=value):
+                    assert resolve_vnc_target(grant.token, self.gateway) is None
+                    with self.assertRaises(WorkspaceOperationError):
+                        issue_vnc_grant(self.user, self.workspace, self.gateway)
+        assert resolve_vnc_target(grant.token, self.gateway) == (
+            'unix_socket', '/run/zog/test/vnc.sock')
+        assert len(self.transport.started) == 1
+
+    def test_first_workspace_postgrant_readiness_loss_and_recovery_without_stale_reuse(self):
+        """A lost X11/RFB response revokes prior grants before another connection."""
+        from zog.station_access.services.vnc import VncUnavailableError
+        self.ready()
+        old_grant = issue_vnc_grant(self.user, self.workspace, self.gateway)
+        old_revision = self.workspace.endpoint_revision
+        runtime_id, request_id = self.workspace.runtime_id, self.workspace.launch_request_id
+        with patch.object(self.gateway, 'workspace_desktop_access',
+                          side_effect=WorkspaceOperationError('RFB endpoint inaccessible')):
+            with self.assertRaisesMessage(WorkspaceOperationError, 'RFB endpoint inaccessible'):
+                self.ready()
+            self.workspace.refresh_from_db()
+            assert not self.workspace.endpoint_ready
+            with self.assertRaises(VncUnavailableError):
+                issue_vnc_grant(self.user, self.workspace, self.gateway)
+            assert resolve_vnc_target(old_grant.token, self.gateway) is None
+            response = self.client.get(self.status_url())
+            assert response.status_code == 200
+            assert response.json()['desktop'] != 'ready'
+            assert '/run/zog/test/vnc.sock' not in response.content.decode()
+        assert self.ready().runtime_id == runtime_id
+        self.workspace.refresh_from_db()
+        assert self.workspace.launch_request_id == request_id
+        assert self.workspace.endpoint_revision == old_revision
+        assert len(self.transport.started) == 1
+        # Previous grants never reconnect after explicit stop or runtime switch.
+        self.assertIsNotNone(resolve_vnc_target(old_grant.token, self.gateway))
+        stop_workspace(self.workspace, self.gateway)
+        assert resolve_vnc_target(old_grant.token, self.gateway) is None
