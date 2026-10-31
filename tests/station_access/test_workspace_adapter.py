@@ -60,6 +60,41 @@ class WorkspaceAdapterTests(TestCase):
         with patch.object(self.gateway, 'workspace_desktop_access', return_value=dict(value, vnc_endpoint={'kind':'unix','path':'/run/changed','browser_direct':False})):
             assert resolve_vnc_target(grant.token, self.gateway) is None
 
+
+    def test_novnc_grant_fails_closed_on_unready_or_foreign_desktop(self):
+        self.ready()
+        original = self.gateway.workspace_desktop_access(str(self.workspace.pk))
+        invalid = (
+            dict(original, ready=False),
+            dict(original, desktop_runtime_id='other-desktop'),
+            dict(original, workspace_id=str(uuid4())),
+            dict(original, vnc_endpoint={'kind':'tcp','path':'/run/zog/test/vnc.sock','browser_direct':False}),
+            dict(original, vnc_endpoint={'kind':'unix','path':'/run/zog/test/vnc.sock','browser_direct':True}),
+            dict(original, vnc_endpoint={'kind':'unix','path':'/run/../private/vnc.sock','browser_direct':False}),
+        )
+        for response in invalid:
+            with self.subTest(response=response), patch.object(self.gateway, 'workspace_desktop_access', return_value=response):
+                with self.assertRaises(WorkspaceOperationError):
+                    issue_vnc_grant(self.user, self.workspace, self.gateway)
+
+    def test_novnc_existing_grant_revoked_by_readiness_failure(self):
+        self.ready()
+        grant = issue_vnc_grant(self.user, self.workspace, self.gateway)
+        valid = self.gateway.workspace_desktop_access(str(self.workspace.pk))
+        prior_revision = self.workspace.endpoint_revision
+        original_runtime, original_request = self.workspace.runtime_id, self.workspace.launch_request_id
+        with patch.object(self.gateway, 'workspace_desktop_access', return_value=dict(valid, ready=False)):
+            assert resolve_vnc_target(grant.token, self.gateway) is None
+        self.workspace.refresh_from_db()
+        assert not self.workspace.endpoint_ready
+        assert self.workspace.endpoint_revision > prior_revision
+        assert self.ready().runtime_id == original_runtime
+        assert self.workspace.launch_request_id == original_request
+        # Recovery to the identical desktop/socket MUST NOT revive this token.
+        assert resolve_vnc_target(grant.token, self.gateway) is None
+        fresh = issue_vnc_grant(self.user, self.workspace, self.gateway)
+        assert resolve_vnc_target(fresh.token, self.gateway) == ('unix_socket', '/run/zog/test/vnc.sock')
+
     def test_legacy_launch_evidence_is_preserved(self):
         self.workspace.launch_request_id = 'old-request'
         self.workspace.launch_pending = True
