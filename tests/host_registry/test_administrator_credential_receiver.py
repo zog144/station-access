@@ -97,8 +97,13 @@ class AdministratorCredentialReceiverTests(TestCase):
             "previous_delivery_id": None,
             "created_at": self.now, "expires_at": self.now + 120,
         }
+        # A request can be signed while authorization is approved, then
+        # independently revoked before the local receiver is called.
+        signing_view = (auth if auth["status"] == "approved" else
+                        dict(auth, status="approved", revoked_at=None))
         signed_request = cd.prepare_request(
-            ORIGIN + PATH, request, auth, self.host_key, nonce="F" + uuid.uuid4().hex[:23])
+            ORIGIN + PATH, request, signing_view, self.host_key,
+            nonce="F" + uuid.uuid4().hex[:23])
         delivery = {
             "schema": cd.DELIVERY_SCHEMA, "request_id": request["request_id"],
             "delivery_id": str(uuid.uuid4()), "authorization_id": auth["authorization_id"],
