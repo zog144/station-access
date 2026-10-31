@@ -20,6 +20,7 @@ from zog.station_access.services.vnc import (
     VncUnavailableError,
     issue_vnc_grant,
     resolve_vnc_target,
+    revoke_vnc_token_on_controller_loss,
 )
 from zog.station_access.services.workspaces import (
     WorkspaceOperationError,
@@ -31,6 +32,7 @@ from zog.station_access.services.workspaces import (
     start_workspace,
     stop_workspace,
     workspace_runtime_state,
+    invalidate_workspace_on_controller_loss,
 )
 from .serializers import application_json, runtime_json, workspace_json
 
@@ -335,10 +337,11 @@ def workspace_vnc_grant(request, workspace_id):
     denied = _authenticated(request)
     if denied:
         return denied
+    workspace = _workspace_for_user(request, workspace_id)
     gateway, error = _gateway_or_response()
     if error:
+        invalidate_workspace_on_controller_loss(workspace)
         return error
-    workspace = _workspace_for_user(request, workspace_id)
     try:
         ensure_workspace_ready(workspace, gateway)
         grant = issue_vnc_grant(request.user, workspace, gateway)
@@ -372,6 +375,7 @@ def websockify_target(request, secret: str):
         return JsonResponse({"error": "not_found"}, status=404)
     gateway, error = _gateway_or_response()
     if error:
+        revoke_vnc_token_on_controller_loss(token)
         return error
     target = resolve_vnc_target(token, gateway)
     if target is None:
