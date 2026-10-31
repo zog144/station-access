@@ -223,11 +223,23 @@ def ensure_workspace_ready(workspace, gateway):
             workspace.endpoint_ready = bool(ready)
             workspace.save(update_fields=("endpoint_ready", "updated_at"))
         except OSError:
-            workspace.endpoint_ready = False
-            workspace.save(update_fields=("endpoint_ready", "updated_at"))
+            # A previously ready endpoint may come back on the same runtime.
+            # Expire its grants first: an old token must never resurrect after
+            # desktop/X11/RFB verification was lost.
+            if workspace.endpoint_ready:
+                _invalidate(workspace)
+                workspace.save(update_fields=("endpoint_ready", "endpoint_revision", "updated_at"))
+            else:
+                workspace.endpoint_ready = False
+                workspace.save(update_fields=("endpoint_ready", "updated_at"))
         except Exception as exc:
             logger.exception("Workspace first-use failed", extra={"workspace_id": str(workspace.pk), "request_id": workspace.launch_request_id})
-            VncWorkspace.objects.filter(pk=workspace.pk).update(last_error=str(exc), endpoint_ready=False)
+            if workspace.endpoint_ready:
+                _invalidate(workspace)
+                workspace.last_error = str(exc)
+                workspace.save(update_fields=("endpoint_ready", "endpoint_revision", "last_error", "updated_at"))
+            else:
+                VncWorkspace.objects.filter(pk=workspace.pk).update(last_error=str(exc), endpoint_ready=False)
             raise
         if not workspace.endpoint_ready:
             raise WorkspaceOperationError("Display is starting or unavailable; retry shortly")
