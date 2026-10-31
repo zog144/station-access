@@ -168,6 +168,7 @@ def _envelopes(*, signed_authorization, signed_delivery, request_body,
                 or signatures.fingerprint(Ed25519PublicKey.from_public_bytes(host_pin)) !=
                    binding["host_fingerprint"]):
             deny()
+        strict(request_body)  # Exact canonical frame, no duplicate keys or alternate encodings.
         request, nonce, expiry = cd.verify_request_http(
             request_url, "POST", request_headers, request_body,
             Ed25519PublicKey.from_public_bytes(host_pin), auth, now=now)
