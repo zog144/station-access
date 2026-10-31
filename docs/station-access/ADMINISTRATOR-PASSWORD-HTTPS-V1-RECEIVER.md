@@ -26,3 +26,41 @@ The method returns only a `zog-station-admin-password-protected-commit-v1` resul
 **Native Work:** verify installed source and wheel RECORD, source signing and operator key provenance, selected account/revision, root/Django UID isolation and socket ownership, rollback, reboot and caller denial. Then seek separate operator approval before a delivery endpoint or live password transfer. Retained FIRST-LOGIN and station-login files must not be reused as authorization. Do not export Django password hashes or presume they contain a recoverable secret.
 
 **Source tests are synthetic only. No real password transfer, credential authority activation, root installation, browser API exposure, AWS or STATE modification is approved here.**
+
+
+## Draft root broker ↔ Django local FD handoff (task 4)
+
+The protected local process boundary now has a source-only adapter,
+`administrator_fd_broker.install_from_broker` and
+`administrator_fd_broker.inspect_from_broker`. **Neither is a URL, enabled
+service, task handler or installed privilege.** A separate setting,
+`HOST_ADMIN_PASSWORD_V1_FD_BROKER_ENABLED=False`, is hard-disabled alongside
+the existing receiver. The installed root broker UID pin is absent by default
+(`HOST_ADMIN_PASSWORD_V1_FD_BROKER_UID=None`). Source tests temporarily
+override these values; that is not operator authorization.
+
+The independently installed broker must prepare an `AF_UNIX SOCK_SEQPACKET`
+connected channel, with both directions' `SO_PASSCRED` enabled **before**
+any message may be queued. The receiver binds Linux `SO_PEERCRED`,
+per-message `SCM_CREDENTIALS`, the independently pinned PID/UID/GID, PID
+start time and exact cgroup, and the exact signed
+request/delivery/authorization/revision/account frame. Only one read-only,
+anonymous, fully sealed FD is admitted through `SCM_RIGHTS`; extra
+descriptors, truncation and foreign peers fail closed. The FD is closed after
+Django's existing protected writer attempts the transaction.
+
+After the Django commit, a secret-free commit result is sent back on the same
+peer-verified channel. If that response is lost, the *protected original
+installer* connects again and sends an exact descriptor-free recovery
+operation. Django looks up durable `AdministratorPasswordReception` history
+and returns the same committed result, never rehashing a new password nor
+replaying the delivery. The host-install owner must compare the returned
+metadata with the original signed request/delivery and its durable ledger;
+expired historical delivery is **inspection-only**, not a new grant.
+
+Common transport source: [root-control PR #19](https://github.com/zog144/root-control/pull/19).
+Installer source: [host-install PR #11](https://github.com/zog144/host-install/pull/11).
+A new reviewed, immutable root-control dependency pin, trusted installed
+source/wheel, root-managed socket and unit identity, operator authority,
+real post-fork peer proof and native rollback/reboot acceptance are all
+outstanding. **No live password transfer or Host-signed receipt is approved.**
