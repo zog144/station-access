@@ -275,6 +275,9 @@ class AdministratorCredentialReceiverTests(TestCase):
         altered = dict(args, request_url=ORIGIN + "/api/users/")
         with self.assertRaises(receiver.ProtectedAdminCredentialDenied):
             self.install(altered)
+        altered = dict(args, request_body=args["request_body"] + b"\\n")
+        with self.assertRaises(receiver.ProtectedAdminCredentialDenied):
+            self.install(altered)
         self.target.is_superuser = False; self.target.save(update_fields=["is_superuser"])
         with self.assertRaises(receiver.ProtectedAdminCredentialDenied):
             self.install(args)
