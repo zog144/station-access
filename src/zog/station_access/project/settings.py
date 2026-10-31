@@ -214,5 +214,9 @@ HOST_CREDENTIAL_V1_AUTHORITY_APPROVAL_FILE = os.environ.get("HOST_CREDENTIAL_V1_
 # receiver UID are required before any secret FD may reach Django.
 HOST_ADMIN_PASSWORD_V1_RECEIVER_ENABLED = False
 HOST_ADMIN_PASSWORD_V1_RECEIVER_UID = None
+# Separate root-broker admission. These are not environment-derived switches;
+# an independently reviewed native installation must explicitly provide them.
+HOST_ADMIN_PASSWORD_V1_FD_BROKER_ENABLED = False
+HOST_ADMIN_PASSWORD_V1_FD_BROKER_UID = None
 HOST_ADMIN_PASSWORD_V1_OPERATOR_PIN_SHA256 = ""
 HOST_ADMIN_PASSWORD_V1_AUTHORITY_PIN_SHA256 = ""
