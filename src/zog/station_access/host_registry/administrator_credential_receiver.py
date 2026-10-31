@@ -29,6 +29,7 @@ from zog.host_identify import credential_delivery as cd, signatures
 from .identity import audit, consume, locked
 from .models import AdministratorPasswordReception
 from .user_views import revision, revoke
+from zog.station_access.credential_https_interop import PATH
 
 CONSUMER = "station-access"
 PURPOSE = "station-access-administrator-password"
@@ -152,7 +153,7 @@ def _envelopes(*, signed_authorization, signed_delivery, request_body,
     }
     try:
         actual_origin = signatures.origin(expected_origin)
-        if (signatures.origin(request_url) != actual_origin
+        if (request_url != actual_origin + PATH
                 or signatures.origin(approval["issuer"]) != actual_origin):
             deny()
         auth = cd.verify_authorization(
