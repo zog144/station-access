@@ -35,13 +35,16 @@ def _readiness_lost(workspace):
     external controller call. Both grant revocation and the revision change
     finish before a denied connection can be retried against the same desktop.
     """
-    if (workspace.endpoint_ready or
-            VncAccessGrant.objects.filter(workspace=workspace, revoked_at__isnull=True).exists()):
-        _invalidate(workspace)
-        workspace.save(update_fields=("endpoint_ready", "endpoint_revision", "updated_at"))
-    else:
-        workspace.endpoint_ready = False
-        workspace.save(update_fields=("endpoint_ready", "updated_at"))
+    # Only database writes are transactional; the controller probe has
+    # already finished, so no external call holds an open DB transaction.
+    with transaction.atomic():
+        if (workspace.endpoint_ready or
+                VncAccessGrant.objects.filter(workspace=workspace, revoked_at__isnull=True).exists()):
+            _invalidate(workspace)
+            workspace.save(update_fields=("endpoint_ready", "endpoint_revision", "updated_at"))
+        else:
+            workspace.endpoint_ready = False
+            workspace.save(update_fields=("endpoint_ready", "updated_at"))
 
 
 def workspace_runtime_state(workspace, gateway):
