@@ -128,7 +128,7 @@ class AdministratorCredentialReceiverTests(TestCase):
             "authorization_envelope_sha256": hashlib.sha256(envelope).hexdigest(),
             "credential_revision": auth["credential_revision"],
             "authority_signer_sha256": hashlib.sha256(KEY(self.authority_key)).hexdigest(),
-            "issued_at": self.now - 1, "expires_at": self.now + 1200,
+            "issued_at": self.now - 1, "expires_at": self.now + 2400,
         }
         proposal.update(updates.get("policy", {}))
         proposal["operator_signature"] = base64.b64encode(self.operator_key.sign(
