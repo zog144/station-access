@@ -139,3 +139,24 @@ def resolve_vnc_target(token: str, gateway: BoxControlGateway):
             _readiness_lost(workspace)
             return None
         return grant.target_host, grant.target_port
+
+
+def revoke_vnc_token_on_controller_loss(token: str):
+    """A rejected websockify gateway lookup is permanent for existing tokens.
+
+    The controller might be offline before resolve_vnc_target can probe it.
+    Bind to the saved workspace under its lock, then fence every old grant.
+    No token, certificate, or controller secret is returned.
+    """
+    try:
+        initial = VncAccessGrant.objects.only("workspace_id").get(token_digest=_digest(token))
+    except VncAccessGrant.DoesNotExist:
+        return
+    with workspace_lock(initial.workspace_id):
+        try:
+            grant = VncAccessGrant.objects.select_related("workspace").get(
+                token_digest=_digest(token), workspace_id=initial.workspace_id)
+        except VncAccessGrant.DoesNotExist:
+            return
+        if grant.revoked_at is None and grant.expires_at > timezone.now():
+            _readiness_lost(grant.workspace)
