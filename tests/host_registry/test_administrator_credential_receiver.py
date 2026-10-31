@@ -212,7 +212,8 @@ class AdministratorCredentialReceiverTests(TestCase):
         with self.assertRaises(receiver.ProtectedAdminCredentialDenied):
             self.install(args)
         self.target.refresh_from_db()
-        fresh, _ = self.frames(credential_revision=2)
+        fresh, _ = self.frames(credential_revision=2,
+                               password="New-synthetic-rotation-Password-0987!")
         self.install(fresh, password="New-synthetic-rotation-Password-0987!")
         assert AdministratorPasswordReception.objects.count() == 2
         assert list(AdministratorPasswordReception.objects.order_by(
