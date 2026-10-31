@@ -78,9 +78,19 @@ class WorkspaceAdapterTests(TestCase):
         self.ready()
         grant = issue_vnc_grant(self.user, self.workspace, self.gateway)
         valid = self.gateway.workspace_desktop_access(str(self.workspace.pk))
+        prior_revision = self.workspace.endpoint_revision
+        original_runtime, original_request = self.workspace.runtime_id, self.workspace.launch_request_id
         with patch.object(self.gateway, 'workspace_desktop_access', return_value=dict(valid, ready=False)):
             assert resolve_vnc_target(grant.token, self.gateway) is None
-        assert resolve_vnc_target(grant.token, self.gateway) == ('unix_socket', '/run/zog/test/vnc.sock')
+        self.workspace.refresh_from_db()
+        assert not self.workspace.endpoint_ready
+        assert self.workspace.endpoint_revision > prior_revision
+        assert self.ready().runtime_id == original_runtime
+        assert self.workspace.launch_request_id == original_request
+        # Recovery to the identical desktop/socket MUST NOT revive this token.
+        assert resolve_vnc_target(grant.token, self.gateway) is None
+        fresh = issue_vnc_grant(self.user, self.workspace, self.gateway)
+        assert resolve_vnc_target(fresh.token, self.gateway) == ('unix_socket', '/run/zog/test/vnc.sock')
 
     def test_legacy_launch_evidence_is_preserved(self):
         self.workspace.launch_request_id = 'old-request'
