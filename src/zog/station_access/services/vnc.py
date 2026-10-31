@@ -48,6 +48,9 @@ def issue_vnc_grant(
             _readiness_lost(workspace)
             raise VncUnavailableError("workspace is not running")
         if not workspace.endpoint_ready:
+            # Also clean up legacy records that lost readiness without
+            # revoking grants before this correction was installed.
+            _readiness_lost(workspace)
             raise VncUnavailableError("workspace display is not ready")
         try:
             runtime = getattr(gateway, "get_current_runtime", gateway.get_runtime)(workspace.runtime_id)
@@ -115,8 +118,7 @@ def resolve_vnc_target(token: str, gateway: BoxControlGateway):
             return None
         if (not workspace.endpoint_ready or not workspace.desired_running
                 or workspace.runtime_id != grant.runtime_id):
-            if workspace.endpoint_ready:
-                _readiness_lost(workspace)
+            _readiness_lost(workspace)
             return None
         if workspace.endpoint_revision != grant.endpoint_revision:
             return None
