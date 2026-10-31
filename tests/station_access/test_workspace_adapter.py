@@ -424,3 +424,43 @@ class WorkspaceAdapterTests(TestCase):
                 assert self.ready().runtime_id == original_runtime
                 assert resolve_vnc_target(old.token, self.gateway) is None
         assert len(self.transport.started) == 1
+
+
+    def test_websockify_gateway_outage_revokes_original_token_without_probe(self):
+        from django.http import JsonResponse
+        self.ready()
+        old = issue_vnc_grant(self.user, self.workspace, self.gateway)
+        revision = self.workspace.endpoint_revision
+        original_runtime = self.workspace.runtime_id
+        with patch('zog.station_access.api.views._gateway_or_response',
+                   return_value=(None, JsonResponse({'error': 'controller_unavailable'}, status=503))):
+            response = self.client.get(
+                '/internal/websockify-target/development-websockify-secret/',
+                {'token': old.token})
+        assert response.status_code == 503
+        self.workspace.refresh_from_db()
+        assert not self.workspace.endpoint_ready
+        assert self.workspace.endpoint_revision > revision
+        assert not VncAccessGrant.objects.filter(workspace=self.workspace, revoked_at__isnull=True).exists()
+        assert self.ready().runtime_id == original_runtime
+        assert resolve_vnc_target(old.token, self.gateway) is None
+        fresh = issue_vnc_grant(self.user, self.workspace, self.gateway)
+        assert resolve_vnc_target(fresh.token, self.gateway) == ('unix_socket', '/run/zog/test/vnc.sock')
+
+    def test_vnc_grant_gateway_outage_revokes_previous_grants(self):
+        from django.http import JsonResponse
+        self.ready()
+        old = issue_vnc_grant(self.user, self.workspace, self.gateway)
+        revision = self.workspace.endpoint_revision
+        original_runtime, original_request = self.workspace.runtime_id, self.workspace.launch_request_id
+        with patch('zog.station_access.api.views._gateway_or_response',
+                   return_value=(None, JsonResponse({'error': 'controller_unavailable'}, status=503))):
+            response = self.client.post(f'/api/workspaces/{self.workspace.pk}/vnc-grant/')
+        assert response.status_code == 503
+        self.workspace.refresh_from_db()
+        assert not self.workspace.endpoint_ready
+        assert self.workspace.endpoint_revision > revision
+        assert not VncAccessGrant.objects.filter(workspace=self.workspace, revoked_at__isnull=True).exists()
+        assert self.ready().runtime_id == original_runtime
+        assert self.workspace.launch_request_id == original_request
+        assert resolve_vnc_target(old.token, self.gateway) is None
