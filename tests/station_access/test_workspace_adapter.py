@@ -7,8 +7,11 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from zog.station_access.box_control.current import CurrentBoxControlGateway
 from zog.station_access.box_control.port import BoxControlUnavailable
-from zog.station_access.models import ApplicationOwnership, WorkspaceApplicationLaunch
-from zog.station_access.services.workspaces import create_workspace, ensure_workspace_ready, stop_workspace, delete_workspace, WorkspaceOperationError
+from zog.station_access.models import ApplicationOwnership, WorkspaceApplicationLaunch, VncAccessGrant
+from zog.station_access.services.workspaces import (
+    create_workspace, ensure_workspace_ready, stop_workspace, start_workspace,
+    reconcile_workspace, delete_workspace, WorkspaceOperationError,
+)
 from zog.station_access.services.workspace_applications import launch_application, application_members
 from zog.station_access.services.vnc import issue_vnc_grant, resolve_vnc_target
 
@@ -311,10 +314,18 @@ class WorkspaceAdapterTests(TestCase):
         ]
         for value in malformed:
             with self.subTest(value=value):
+                prior_revision = self.workspace.endpoint_revision
                 with patch.object(self.gateway, 'workspace_desktop_access', return_value=value):
                     assert resolve_vnc_target(grant.token, self.gateway) is None
-                    with self.assertRaises(WorkspaceOperationError):
+                    with self.assertRaises(VncUnavailableError):
                         issue_vnc_grant(self.user, self.workspace, self.gateway)
+                self.workspace.refresh_from_db()
+                assert not self.workspace.endpoint_ready
+                assert self.workspace.endpoint_revision > prior_revision
+                assert VncAccessGrant.objects.get(token_digest=__import__('hashlib').sha256(grant.token.encode()).hexdigest()).revoked_at
+                assert self.ready().runtime_id == self.workspace.runtime_id
+                assert resolve_vnc_target(grant.token, self.gateway) is None
+                grant = issue_vnc_grant(self.user, self.workspace, self.gateway)
         assert resolve_vnc_target(grant.token, self.gateway) == (
             'unix_socket', '/run/zog/test/vnc.sock')
         assert len(self.transport.started) == 1
@@ -351,3 +362,65 @@ class WorkspaceAdapterTests(TestCase):
             'unix_socket', '/run/zog/test/vnc.sock')
         stop_workspace(self.workspace, self.gateway)
         assert resolve_vnc_target(new_grant.token, self.gateway) is None
+
+
+    def test_failed_token_resolution_revokes_durably_on_unchanged_desktop(self):
+        from zog.station_access.services.vnc import VncUnavailableError
+        self.ready()
+        old = issue_vnc_grant(self.user, self.workspace, self.gateway)
+        original_runtime, original_request = self.workspace.runtime_id, self.workspace.launch_request_id
+        revision = self.workspace.endpoint_revision
+        with patch.object(self.gateway, 'workspace_desktop_access', side_effect=OSError('temporary RFB loss')):
+            assert resolve_vnc_target(old.token, self.gateway) is None
+        self.workspace.refresh_from_db()
+        assert not self.workspace.endpoint_ready
+        assert self.workspace.endpoint_revision > revision
+        assert VncAccessGrant.objects.filter(workspace=self.workspace, revoked_at__isnull=True).count() == 0
+        with self.assertRaises(VncUnavailableError):
+            issue_vnc_grant(self.user, self.workspace, self.gateway)
+        assert self.ready().runtime_id == original_runtime
+        self.workspace.refresh_from_db()
+        assert self.workspace.launch_request_id == original_request
+        assert len(self.transport.started) == 1
+        assert resolve_vnc_target(old.token, self.gateway) is None
+        new = issue_vnc_grant(self.user, self.workspace, self.gateway)
+        assert resolve_vnc_target(new.token, self.gateway) == ('unix_socket', '/run/zog/test/vnc.sock')
+
+    def test_failed_grant_issuance_revokes_prior_token_before_recovery(self):
+        from zog.station_access.services.vnc import VncUnavailableError
+        self.ready()
+        previous = issue_vnc_grant(self.user, self.workspace, self.gateway)
+        original_runtime, original_request = self.workspace.runtime_id, self.workspace.launch_request_id
+        revision = self.workspace.endpoint_revision
+        with patch.object(self.gateway, 'workspace_desktop_access', side_effect=WorkspaceOperationError('X11 not ready')):
+            with self.assertRaises(VncUnavailableError):
+                issue_vnc_grant(self.user, self.workspace, self.gateway)
+        self.workspace.refresh_from_db()
+        assert self.workspace.endpoint_revision > revision
+        assert not self.workspace.endpoint_ready
+        assert not VncAccessGrant.objects.filter(workspace=self.workspace, revoked_at__isnull=True).exists()
+        assert self.ready().runtime_id == original_runtime
+        assert self.workspace.launch_request_id == original_request
+        assert resolve_vnc_target(previous.token, self.gateway) is None
+        assert len(self.transport.started) == 1
+
+    def test_start_and_reconcile_errors_revoke_old_tokens_without_desktop_relaunch(self):
+        self.ready()
+        original_runtime, original_request = self.workspace.runtime_id, self.workspace.launch_request_id
+        for operation in (start_workspace, reconcile_workspace):
+            self.ready()
+            old = issue_vnc_grant(self.user, self.workspace, self.gateway)
+            revision = self.workspace.endpoint_revision
+            with self.subTest(operation=operation.__name__):
+                with patch.object(self.gateway, 'get_current_runtime', side_effect=OSError('controller disconnected')):
+                    with self.assertRaises(OSError):
+                        operation(self.workspace, self.gateway)
+                self.workspace.refresh_from_db()
+                assert not self.workspace.endpoint_ready
+                assert self.workspace.endpoint_revision > revision
+                assert VncAccessGrant.objects.filter(workspace=self.workspace, revoked_at__isnull=True).count() == 0
+                assert self.workspace.runtime_id == original_runtime
+                assert self.workspace.launch_request_id == original_request
+                assert self.ready().runtime_id == original_runtime
+                assert resolve_vnc_target(old.token, self.gateway) is None
+        assert len(self.transport.started) == 1
