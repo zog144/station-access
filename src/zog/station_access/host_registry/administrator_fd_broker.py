@@ -55,13 +55,17 @@ def install_from_broker(*, channel, broker_peer, install_args):
         operator_pin=install_args["operator_pin"],
         signed_approval=install_args["signed_approval"],
         expected_origin=install_args["expected_origin"], now=now)
-    from zog.root_control.administrator_fd import receive_secret_fd
-    secret = receive_secret_fd(channel, broker=broker_peer,
-                               frame=_frame((auth, request, delivery), approval))
+    from zog.root_control.administrator_fd import receive_secret_fd, send_commit
+    frame = _frame((auth, request, delivery), approval)
+    secret = receive_secret_fd(channel, broker=broker_peer, frame=frame)
     try:
-        return receiver.install(**install_args, secret_fd=secret)
+        commit = receiver.install(**install_args, secret_fd=secret)
     finally:
         os.close(secret)
+    # Database transaction already committed; an uncertain reply is recovered
+    # with inspect_from_broker, NEVER by replaying the password mutation.
+    send_commit(channel, receiver=broker_peer, frame=frame, commit=commit)
+    return commit
 
 
 def inspect_from_broker(*, channel, broker_peer, request_id, delivery_id,
@@ -72,7 +76,8 @@ def inspect_from_broker(*, channel, broker_peer, request_id, delivery_id,
     original request/delivery record; never from a browser or wire message.
     """
     _broker_gate(broker_peer)
-    from zog.root_control.administrator_fd import operation_frame, receive_recovery
+    from zog.root_control.administrator_fd import (
+        operation_frame, receive_recovery, send_commit)
     frame = operation_frame(request_id=request_id, delivery_id=delivery_id,
                             authorization_id=authorization_id,
                             credential_revision=credential_revision,
@@ -84,4 +89,5 @@ def inspect_from_broker(*, channel, broker_peer, request_id, delivery_id,
         or result["credential_revision"] != credential_revision
         or result["account_id"] != account_id):
         receiver.deny()
+    send_commit(channel, receiver=broker_peer, frame=frame, commit=result)
     return result
