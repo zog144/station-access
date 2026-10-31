@@ -304,6 +304,7 @@ class AdministratorCredentialReceiverTests(TestCase):
                 return os.dup(fd)
             fake.receive_secret_fd = transfer
             fake.receive_recovery = lambda channel, *, broker, frame: observed.append(("recover", frame))
+            fake.send_commit = lambda channel, *, receiver, frame, commit: observed.append(("commit", commit["request_id"]))
             options = dict(self.options, HOST_ADMIN_PASSWORD_V1_FD_BROKER_ENABLED=True,
                            HOST_ADMIN_PASSWORD_V1_FD_BROKER_UID=0)
             with patch.dict(sys.modules, {"zog.root_control": fake_parent,
@@ -317,6 +318,7 @@ class AdministratorCredentialReceiverTests(TestCase):
                     assert observed[0][1]["account_id"] == self.target.pk
                     assert observed[0][1]["request_id"] == result["request_id"]
                     assert observed[1][0] == "transfer"
+                    assert any(item[0] == "commit" for item in observed)
                     assert bridge.inspect_from_broker(
                         channel=object(), broker_peer=peer,
                         request_id=result["request_id"], delivery_id=result["delivery_id"],
