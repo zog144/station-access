@@ -398,6 +398,9 @@ jobs:
       - name: Validate read-only console progress and local-seat boundary
         run: python tools/test-backend.py tests.host_registry.test_application_progress
 
+      - name: Test protected administrator HTTPS v1 receiver with sealed synthetic FDs
+        run: python tools/test-backend.py tests.host_registry.test_administrator_credential_receiver
+
       - name: Run complete Django backend test suite
         run: python tools/test-backend.py
 
