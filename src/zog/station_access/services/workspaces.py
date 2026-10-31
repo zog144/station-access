@@ -27,6 +27,23 @@ def _invalidate(workspace):
     workspace.endpoint_ready = False
     workspace.endpoint_revision += 1
 
+
+def _readiness_lost(workspace):
+    """Durably fence existing tokens on a failed controller probe.
+
+    Caller holds workspace_lock; never hold a database transaction across an
+    external controller call. Both grant revocation and the revision change
+    finish before a denied connection can be retried against the same desktop.
+    """
+    if (workspace.endpoint_ready or
+            VncAccessGrant.objects.filter(workspace=workspace, revoked_at__isnull=True).exists()):
+        _invalidate(workspace)
+        workspace.save(update_fields=("endpoint_ready", "endpoint_revision", "updated_at"))
+    else:
+        workspace.endpoint_ready = False
+        workspace.save(update_fields=("endpoint_ready", "updated_at"))
+
+
 def workspace_runtime_state(workspace, gateway):
     runtime = getattr(gateway, "get_current_runtime", gateway.get_runtime)(workspace.runtime_id) if workspace.runtime_id else None
     if workspace.last_error:
@@ -167,8 +184,9 @@ def _operate(workspace, gateway, desired=None):
             return _ensure(workspace, gateway) if workspace.desired_running else _stop(workspace, gateway)
         except Exception as exc:
             logger.exception("Workspace operation failed", extra={"workspace_id": str(workspace.pk), "request_id": workspace.launch_request_id})
-            VncWorkspace.objects.filter(pk=workspace.pk).update(last_error=str(exc), endpoint_ready=False)
-            workspace.refresh_from_db()
+            _readiness_lost(workspace)
+            workspace.last_error = str(exc)
+            workspace.save(update_fields=("last_error", "updated_at"))
             raise
 
 def start_workspace(workspace, gateway):
@@ -220,26 +238,20 @@ def ensure_workspace_ready(workspace, gateway):
                 return controller_ready(workspace, gateway)
             runtime = _ensure(workspace, gateway)
             ready = getattr(gateway, "workspace_ready", probe_display)(workspace.vnc_host, workspace.vnc_port)
-            workspace.endpoint_ready = bool(ready)
-            workspace.save(update_fields=("endpoint_ready", "updated_at"))
-        except OSError:
-            # A previously ready endpoint may come back on the same runtime.
-            # Expire its grants first: an old token must never resurrect after
-            # desktop/X11/RFB verification was lost.
-            if workspace.endpoint_ready:
-                _invalidate(workspace)
-                workspace.save(update_fields=("endpoint_ready", "endpoint_revision", "updated_at"))
+            if not ready:
+                _readiness_lost(workspace)
             else:
-                workspace.endpoint_ready = False
+                workspace.endpoint_ready = True
                 workspace.save(update_fields=("endpoint_ready", "updated_at"))
+        except OSError:
+            # A failed controller/desktop read permanently fences old grants,
+            # even when the original runtime and socket subsequently recover.
+            _readiness_lost(workspace)
         except Exception as exc:
             logger.exception("Workspace first-use failed", extra={"workspace_id": str(workspace.pk), "request_id": workspace.launch_request_id})
-            if workspace.endpoint_ready:
-                _invalidate(workspace)
-                workspace.last_error = str(exc)
-                workspace.save(update_fields=("endpoint_ready", "endpoint_revision", "last_error", "updated_at"))
-            else:
-                VncWorkspace.objects.filter(pk=workspace.pk).update(last_error=str(exc), endpoint_ready=False)
+            _readiness_lost(workspace)
+            workspace.last_error = str(exc)
+            workspace.save(update_fields=("last_error", "updated_at"))
             raise
         if not workspace.endpoint_ready:
             raise WorkspaceOperationError("Display is starting or unavailable; retry shortly")
@@ -319,5 +331,7 @@ def delete_workspace(workspace, gateway, *, revision):
                 _revoke_grants(workspace)
                 workspace.delete()
         except Exception as exc:
-            VncWorkspace.objects.filter(pk=workspace.pk).update(last_error=str(exc), endpoint_ready=False)
+            _readiness_lost(workspace)
+            workspace.last_error = str(exc)
+            workspace.save(update_fields=("last_error", "updated_at"))
             raise
