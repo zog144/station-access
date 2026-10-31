@@ -96,7 +96,6 @@ def issue_vnc_grant(
 
 
 def resolve_vnc_target(token: str, gateway: BoxControlGateway):
-    now = timezone.now()
     try:
         initial = VncAccessGrant.objects.only("workspace_id").get(token_digest=_digest(token))
     except VncAccessGrant.DoesNotExist:
@@ -112,7 +111,9 @@ def resolve_vnc_target(token: str, gateway: BoxControlGateway):
         except VncAccessGrant.DoesNotExist:
             return None
         workspace = grant.workspace
-        if grant.revoked_at is not None or grant.expires_at <= now:
+        # TTL is tested after waiting for the Workspace lock, never from a
+        # timestamp sampled before a potentially long controller operation.
+        if grant.revoked_at is not None or grant.expires_at <= timezone.now():
             return None
         if not grant.user.is_active or (workspace.owner_id != grant.user_id and not grant.user.is_superuser):
             return None
