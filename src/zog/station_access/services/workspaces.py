@@ -47,6 +47,13 @@ def _readiness_lost(workspace):
             workspace.save(update_fields=("endpoint_ready", "updated_at"))
 
 
+def invalidate_workspace_on_controller_loss(workspace):
+    """Fence browser tokens even if the controller gateway cannot be opened."""
+    with workspace_lock(workspace.pk):
+        workspace.refresh_from_db()
+        _readiness_lost(workspace)
+
+
 def workspace_runtime_state(workspace, gateway):
     runtime = getattr(gateway, "get_current_runtime", gateway.get_runtime)(workspace.runtime_id) if workspace.runtime_id else None
     if workspace.last_error:
