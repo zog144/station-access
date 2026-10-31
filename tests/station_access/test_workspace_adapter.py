@@ -342,9 +342,12 @@ class WorkspaceAdapterTests(TestCase):
         assert self.ready().runtime_id == runtime_id
         self.workspace.refresh_from_db()
         assert self.workspace.launch_request_id == request_id
-        assert self.workspace.endpoint_revision == old_revision
+        assert self.workspace.endpoint_revision > old_revision
         assert len(self.transport.started) == 1
-        # Previous grants never reconnect after explicit stop or runtime switch.
-        self.assertIsNotNone(resolve_vnc_target(old_grant.token, self.gateway))
-        stop_workspace(self.workspace, self.gateway)
+        # The transient readiness failure irrevocably invalidated old grants.
         assert resolve_vnc_target(old_grant.token, self.gateway) is None
+        new_grant = issue_vnc_grant(self.user, self.workspace, self.gateway)
+        assert resolve_vnc_target(new_grant.token, self.gateway) == (
+            'unix_socket', '/run/zog/test/vnc.sock')
+        stop_workspace(self.workspace, self.gateway)
+        assert resolve_vnc_target(new_grant.token, self.gateway) is None
