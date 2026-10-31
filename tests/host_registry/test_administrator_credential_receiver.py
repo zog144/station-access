@@ -282,3 +282,75 @@ class AdministratorCredentialReceiverTests(TestCase):
         with self.assertRaises(receiver.ProtectedAdminCredentialDenied):
             self.install(args)
         assert not AdministratorPasswordReception.objects.exists()
+
+
+
+    def test_broker_entry_reuses_signature_checks_owns_fd_and_recovers_commit(self):
+        """Synthetic transport adapter; root-control draft tests real SCM_RIGHTS."""
+        import sys
+        from types import ModuleType, SimpleNamespace
+        from unittest.mock import patch
+        from zog.station_access.host_registry import administrator_fd_broker as bridge
+
+        args, delivery = self.frames()
+        observed = []
+        fake_parent = ModuleType("zog.root_control")
+        fake_parent.__path__ = []
+        fake = ModuleType("zog.root_control.administrator_fd")
+        fake.operation_frame = lambda **fields: (observed.append(("frame", fields)) or b"exact-operation")
+        with secret_fd() as fd:
+            def transfer(channel, *, broker, frame):
+                observed.append(("transfer", frame, broker.uid))
+                return os.dup(fd)
+            fake.receive_secret_fd = transfer
+            fake.receive_recovery = lambda channel, *, broker, frame: observed.append(("recover", frame))
+            options = dict(self.options, HOST_ADMIN_PASSWORD_V1_FD_BROKER_ENABLED=True,
+                           HOST_ADMIN_PASSWORD_V1_FD_BROKER_UID=0)
+            with patch.dict(sys.modules, {"zog.root_control": fake_parent,
+                                          "zog.root_control.administrator_fd": fake}):
+                with override_settings(**options), patch.object(receiver.os, "geteuid", return_value=1201):
+                    peer = SimpleNamespace(uid=0)
+                    result = bridge.install_from_broker(channel=object(),
+                                                        broker_peer=peer, install_args=args)
+                    assert result["delivery_id"] == delivery["delivery_id"]
+                    assert result["state"] == "committed-awaiting-host-signed-receipt"
+                    assert observed[0][1]["account_id"] == self.target.pk
+                    assert observed[0][1]["request_id"] == result["request_id"]
+                    assert observed[1][0] == "transfer"
+                    assert bridge.inspect_from_broker(
+                        channel=object(), broker_peer=peer,
+                        request_id=result["request_id"], delivery_id=result["delivery_id"],
+                        authorization_id=result["authorization_id"],
+                        credential_revision=result["credential_revision"],
+                        account_id=result["account_id"]) == result
+                    with self.assertRaises(receiver.ProtectedAdminCredentialDenied):
+                        bridge.inspect_from_broker(
+                            channel=object(), broker_peer=peer,
+                            request_id=result["request_id"], delivery_id=result["delivery_id"],
+                            authorization_id=result["authorization_id"],
+                            credential_revision=result["credential_revision"] + 1,
+                            account_id=result["account_id"])
+                    with self.assertRaises(receiver.ProtectedAdminCredentialDenied):
+                        bridge.install_from_broker(channel=object(),
+                                                   broker_peer=peer, install_args=args)
+        assert AdministratorPasswordReception.objects.count() == 1
+
+    def test_broker_is_hard_disabled_and_rejects_nonroot_sender(self):
+        import sys
+        from types import ModuleType, SimpleNamespace
+        from unittest.mock import patch
+        from zog.station_access.host_registry import administrator_fd_broker as bridge
+
+        args, _ = self.frames()
+        with self.assertRaises(receiver.ProtectedAdminCredentialDenied):
+            bridge.install_from_broker(channel=object(),
+                                       broker_peer=SimpleNamespace(uid=0),
+                                       install_args=args)
+        options = dict(self.options, HOST_ADMIN_PASSWORD_V1_FD_BROKER_ENABLED=True,
+                       HOST_ADMIN_PASSWORD_V1_FD_BROKER_UID=0)
+        with override_settings(**options), patch.object(receiver.os, "geteuid", return_value=1201):
+            with self.assertRaises(receiver.ProtectedAdminCredentialDenied):
+                bridge.install_from_broker(channel=object(),
+                                           broker_peer=SimpleNamespace(uid=1201),
+                                           install_args=args)
+        assert not AdministratorPasswordReception.objects.exists()
