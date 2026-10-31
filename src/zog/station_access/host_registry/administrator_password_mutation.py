@@ -145,7 +145,10 @@ def install_authorized(proposal, plaintext, proof, *, verify_root_admission):
         if verify_root_admission(proposal, proof) is not True:
             deny("root-admission-rejected")
         user = get_user_model().objects.get(pk=proposal["account_id"])
-        validate_for_account(proposal, user)
+        try:
+            validate_for_account(proposal, user)
+        except ValueError:
+            deny("administrator-account-changed")
         if not user.is_staff:
             deny("administrator-role-changed")
 
