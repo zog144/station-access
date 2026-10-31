@@ -352,3 +352,27 @@ class HttpsCredentialV1Operation(models.Model):
     request = models.JSONField()
     delivery_metadata = models.JSONField(default=dict)
     created_at = models.DateTimeField(auto_now_add=True)
+
+
+class AdministratorPasswordReception(models.Model):
+    """Durable secret-free history of protected HTTPS administrator mutations.
+
+    Each signed delivery may be installed once, and every subsequent credential
+    revision must advance for the same account. PROTECT preserves history and
+    denies deleting the account to erase its replay/rotation high-water.
+    """
+    request_id = models.UUIDField(primary_key=True)
+    delivery_id = models.UUIDField(unique=True)
+    authorization_id = models.UUIDField()
+    authorization_revision = models.PositiveBigIntegerField()
+    credential_revision = models.PositiveBigIntegerField()
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    approved_policy_sha256 = models.CharField(max_length=64)
+    account_revision_before = models.CharField(max_length=64)
+    account_revision_after = models.CharField(max_length=64)
+    installed_at = models.DateTimeField()
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["user", "credential_revision"],
+                                    name="station_admin_cred_user_revision_unique"),
+        ]
