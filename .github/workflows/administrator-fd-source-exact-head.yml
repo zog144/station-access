@@ -228,7 +228,7 @@ jobs:
                   raise SystemExit(f"{path} missing public first-party license declaration")
           verify_metadata(discovery_source, "0.4.13", [
               "host-identify==0.3.5", "host-install==0.14.3"])
-          verify_metadata(install_source, "0.14.3", [])
+          verify_metadata(install_source, "0.14.9", [])
           if (candidate["additional_candidates"][1]["candidate_commit"] !=
                   "6e8b3792c6bc43e6b55dd254892105f7abea5a29"
                   or candidate["additional_candidates"][1]["correction_parent"] !=
@@ -236,7 +236,7 @@ jobs:
               raise SystemExit("Host-install corrected immutable candidate has drifted")
           module_source = (install_source / "src/zog/host_install/__init__.py").read_text()
           cli_source = (install_source / "src/zog/host_install/cli.py").read_text()
-          if ('__version__ = "0.14.3"' not in module_source
+          if ('__version__ = "0.14.9"' not in module_source
                   or 'from . import InstallError, __version__' not in cli_source
                   or 'version=f"%(prog)s {__version__}"' not in cli_source):
               raise SystemExit("Corrected host-install source/module/CLI version mismatch")
