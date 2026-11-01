@@ -162,7 +162,8 @@ class AdministratorFdCandidateTests(TestCase):
         from zog.host_install import station_admin_password_receipt as install_contract
 
         args, _ = self.frames()
-        approval, station_auth, request, delivery, _, _ = receiver._envelopes(**args)
+        with override_settings(**self.options):
+            approval, station_auth, request, delivery, _, _ = receiver._envelopes(**args)
 
         assert (
             discover.ADMINISTRATOR_CONSUMER
