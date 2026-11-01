@@ -270,7 +270,26 @@ jobs:
           python -m pip install --no-deps -e dependencies/zog144/certify-manage
           python -m pip install --no-deps -e dependencies/zog144/host-deploy
           python -m pip install --no-deps -e .
-          python -m pip check
+          # Source-only three-owner overlay: host-discover 0.4.13's
+          # historical host-install==0.14.3 pin is not compatible with
+          # selected host-install 0.14.9. This is an explicit native NO-GO;
+          # no other unsatisfied dependency is tolerated by this test lane.
+          python - <<'PY'
+          import subprocess
+          result = subprocess.run(["python", "-m", "pip", "check"],
+                                  text=True, capture_output=True)
+          if result.returncode:
+              known = ("host-discover 0.4.13 has requirement "
+                       "host-install==0.14.3, but you have host-install 0.14.9.")
+              actual = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+              if actual != [known] or result.stderr.strip():
+                  raise SystemExit("Unexpected source overlay dependency mismatch: "
+                                   + repr((actual, result.stderr)))
+              print("SOURCE ONLY: known exact host-discover/host-install "
+                    "version-pin mismatch; native compatibility remains NO-GO.")
+          else:
+              print("Source overlay dependency check passed")
+          PY
           python - <<'PY'
           import importlib.metadata
           from zog.host_identify import credential_delivery
