@@ -154,3 +154,97 @@ class AdministratorFdCandidateTests(TestCase):
                                            install_args=args)
             assert not AdministratorPasswordReception.objects.exists()
 
+
+
+    def test_one_signed_authorization_profile_is_shared_by_three_owners(self):
+        """One authority signature must select the identical profile everywhere."""
+        from zog.host_discover import credential_delivery as discover
+        from zog.host_install import station_admin_password_receipt as install_contract
+
+        args, _ = self.frames()
+        approval, station_auth, request, delivery, _, _ = receiver._envelopes(**args)
+
+        assert (
+            discover.ADMINISTRATOR_CONSUMER
+            == receiver.CONSUMER
+            == install_contract.CONSUMER
+            == "station-access"
+        )
+        assert (
+            discover.ADMINISTRATOR_PURPOSE
+            == receiver.PURPOSE
+            == install_contract.PURPOSE
+            == "station-access-administrator-password"
+        )
+        assert (
+            discover.ADMINISTRATOR_CREDENTIAL_ID
+            == receiver.CREDENTIAL_ID
+            == install_contract.CREDENTIAL_ID
+            == "station-admin"
+        )
+
+        saved = {
+            "installation_id": station_auth["installation_id"],
+            "state_volume_id": station_auth["state_volume_id"],
+            "fingerprint": station_auth["host_fingerprint"],
+            "registries": {
+                station_auth["registry_id"]: {
+                    "origin": ORIGIN,
+                    "role": "control",
+                    "host_id": station_auth["host_id"],
+                    "public_key": "independently-pinned-station-key",
+                    "previous": None,
+                    "pending": None,
+                },
+            },
+        }
+        bootstrap = {
+            "registries": [{
+                "registry_id": station_auth["registry_id"],
+                "origin": ORIGIN,
+                "role": "control",
+            }],
+        }
+        binding = discover.administrator_binding(
+            saved, bootstrap, station_auth["registry_id"])
+        assert binding == cd.binding(station_auth)
+
+        envelope = json.loads(args["signed_authorization"])
+        discover_view = cd.verify_authorization(
+            envelope,
+            self.authority_key.public_key(),
+            expected_issuer=ORIGIN,
+            expected_binding=binding,
+            now=self.now,
+        )
+        install_view = install_contract.verify_authorization(
+            envelope=envelope,
+            authority_key=self.authority_key.public_key(),
+            expected_binding=binding,
+            expected_origin=ORIGIN,
+            now=self.now,
+        )
+        assert discover_view == station_auth == install_view
+
+        commit = {
+            "schema": install_contract.COMMIT_SCHEMA,
+            "state": "committed-awaiting-host-signed-receipt",
+            "request_id": request["request_id"],
+            "delivery_id": delivery["delivery_id"],
+            "authorization_id": station_auth["authorization_id"],
+            "credential_revision": station_auth["credential_revision"],
+            "account_id": approval["user_id"],
+            "installed_at": self.now,
+        }
+        review = install_contract.inspect(
+            commit=commit,
+            authorization=station_auth,
+            request=request,
+            delivery=delivery,
+            expected_binding=binding,
+            expected_account_id=approval["user_id"],
+            expected_origin=ORIGIN,
+            now=self.now,
+        )
+        assert review["source_contract_matched"] is True
+        assert review["host_signed_receipt_authorized"] is False
