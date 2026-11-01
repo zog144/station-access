@@ -33,6 +33,7 @@ from zog.station_access.credential_https_interop import PATH
 
 CONSUMER = "station-access"
 PURPOSE = "station-access-administrator-password"
+CREDENTIAL_ID = "station-admin"
 POLICY_SCHEMA = "zog-station-admin-password-approval-v1"
 RESULT_SCHEMA = "zog-station-admin-password-protected-commit-v1"
 POLICY_FIELDS = frozenset({
@@ -113,6 +114,7 @@ def _approval(raw, operator_pin, authorization_raw, authority_pin, now):
     if (value["authority_signer_sha256"] != hashlib.sha256(authority_pin).hexdigest()
             or value["authorization_envelope_sha256"] != hashlib.sha256(authorization_raw).hexdigest()
             or value["consumer"] != CONSUMER or value["purpose"] != PURPOSE
+            or value["credential_id"] != CREDENTIAL_ID
             or type(value["user_id"]) is not int or value["user_id"] <= 0
             or type(value["username"]) is not str or not value["username"]
             or len(value["username"]) > 150
@@ -150,7 +152,7 @@ def _envelopes(*, signed_authorization, signed_delivery, request_body,
         "registry_id": approval["registry_id"],
         "consumer": CONSUMER,
         "purpose": PURPOSE,
-        "credential_id": approval["credential_id"],
+        "credential_id": CREDENTIAL_ID,
     }
     try:
         actual_origin = signatures.origin(expected_origin)
