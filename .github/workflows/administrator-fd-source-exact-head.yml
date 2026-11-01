@@ -39,7 +39,7 @@ jobs:
       - name: Verify source-only candidate is distinct from accepted publication pins
         run: python tools/check-credential-v1-candidate.py
 
-      - name: Verify accepted baseline and explicitly pending HTTPS companion candidate
+      - name: Verify accepted baseline and independently reviewed HTTPS companion candidate
         id: pins
         run: |
           python - <<'PY'
@@ -63,11 +63,11 @@ jobs:
                   or candidate.get("candidate_commit") != "4a176373ff4cb47a66a8ab1b5fd3d6ff01ff2a3b"
                   or candidate.get("candidate_component_version") != "0.3.5"
                   or candidate.get("canonical_module") != "zog.host_identify.credential_delivery"
-                  or candidate.get("rights_acceptance") != "pending-independent-review"
-                  or candidate.get("consumer_acceptance") != "pending-independent-review"
+                  or candidate.get("rights_acceptance") != "accepted"
+                  or candidate.get("consumer_acceptance") != "accepted"
                   or candidate.get("native_installation_approval") != "not-authorized"
                   or "host-identify==0.3.5" not in runtime["project"]["dependencies"]):
-              raise SystemExit("Host-identify source candidate is not exact or is unexpectedly approved")
+              raise SystemExit("Host-identify source candidate is not exact or source review is missing")
           observed_manifest = subprocess.check_output(
               ["git", "hash-object", "public-companion-pins.json"], text=True).strip()
           if observed_manifest != candidate["accepted_baseline_manifest_blob"]:
@@ -187,7 +187,7 @@ jobs:
           path: dependencies/zog144/host-deploy
           persist-credentials: false
 
-      - name: Read back accepted companion sources and exact pending HTTPS candidate
+      - name: Read back accepted companion sources and exact reviewed HTTPS candidate
         run: |
           python - <<'PY'
           import json
@@ -233,11 +233,54 @@ jobs:
           verify_metadata(discovery_source, "0.4.14", [
               "host-identify==0.3.5", "host-install==0.14.9"])
           verify_metadata(install_source, "0.14.9", [])
-          if (candidate["additional_candidates"][1]["candidate_commit"] !=
-                  "6e8b3792c6bc43e6b55dd254892105f7abea5a29"
-                  or candidate["additional_candidates"][1]["correction_parent"] !=
-                  "79ad2b6f72c89acfca998d393664151010db7134"):
-              raise SystemExit("Host-install corrected immutable candidate has drifted")
+          reviewed = {item["repository"]: item
+                      for item in candidate["additional_candidates"]}
+          if (reviewed["zog144/host-discover"]["candidate_commit"] !=
+                  os.environ["DISCOVER_HEAD"]
+                  or reviewed["zog144/host-discover"]["dependency_candidate_commit"] !=
+                  "ed63d8df3cb733192c82b60dd95d13389b9922b5"
+                  or reviewed["zog144/host-install"]["candidate_commit"] !=
+                  os.environ["INSTALL_HEAD"]
+                  or reviewed["zog144/host-install"]["pr_base_commit"] !=
+                  "17e3e0e6b9405a3a81dc25575ba2dadcf6bfa588"):
+              raise SystemExit("Reviewed administrator companion ancestry has drifted")
+
+          def hash_blob(path, filename):
+              return subprocess.check_output(
+                  ["git", "-C", str(path), "hash-object", filename],
+                  text=True).strip()
+
+          provenance = {
+              "zog144/host-identify": (host_source, candidate["source_provenance"]),
+              "zog144/host-discover": (discovery_source, reviewed["zog144/host-discover"]["source_provenance"]),
+              "zog144/host-install": (install_source, reviewed["zog144/host-install"]["source_provenance"]),
+          }
+          names = {
+              "license_blob_sha1": "LICENSE",
+              "bsd_license_blob_sha1": "LICENSES/BSD-3-Clause.txt",
+              "gpl_license_blob_sha1": "LICENSES/GPL-3.0-only.txt",
+              "notices_blob_sha1": "THIRD-PARTY-NOTICES.md",
+              "pyproject_blob_sha1": "pyproject.toml",
+          }
+          for name, (path, evidence) in provenance.items():
+              for key, filename in names.items():
+                  observed = hash_blob(path, filename)
+                  if observed != evidence[key]:
+                      raise SystemExit(f"{name} reviewed provenance drift: {filename}")
+
+          station_expected = {
+              "LICENSE": "256b0d4cade2d0958384ddf803bf198a086796dc",
+              "LICENSES/BSD-3-Clause.txt": "7e1ffb223693647c1750e550d9fd7ee94ce4ee0b",
+              "LICENSES/GPL-3.0-only.txt": "f6cdd22a6c1fbc887e08a215cb4beb3c47048041",
+              "THIRD-PARTY-NOTICES.md": "81946531be927fe6f8beabbaf6d08ea7d93c194e",
+              "pyproject.toml": "5dce8723ebfcb704714ccfc0c7ed9ad5f596ec29",
+          }
+          for filename, expected in station_expected.items():
+              observed = subprocess.check_output(
+                  ["git", "hash-object", filename], text=True).strip()
+              if observed != expected:
+                  raise SystemExit(f"station-access reviewed provenance drift: {filename}")
+
           module_source = (install_source / "src/zog/host_install/__init__.py").read_text()
           cli_source = (install_source / "src/zog/host_install/cli.py").read_text()
           # PR #11 is 0.14.9: it no longer exposes the older 0.14.3
