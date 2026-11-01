@@ -65,7 +65,7 @@ class AdministratorCredentialReceiverTests(TestCase):
             "registry_id": "station-registry",
             "consumer": receiver.CONSUMER,
             "purpose": receiver.PURPOSE,
-            "credential_id": "station-admin-" + str(self.target.pk),
+            "credential_id": receiver.CREDENTIAL_ID,
         }
         self.options = {
             "HOST_ADMIN_PASSWORD_V1_RECEIVER_ENABLED": True,
