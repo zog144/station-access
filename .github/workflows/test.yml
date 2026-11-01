@@ -104,7 +104,7 @@ jobs:
       - name: Verify source-only candidate is distinct from accepted publication pins
         run: python tools/check-credential-v1-candidate.py
 
-      - name: Verify accepted baseline and explicitly pending HTTPS companion candidate
+      - name: Verify accepted baseline and independently reviewed HTTPS companion candidate
         id: pins
         run: |
           python - <<'PY'
@@ -128,11 +128,11 @@ jobs:
                   or candidate.get("candidate_commit") != "4a176373ff4cb47a66a8ab1b5fd3d6ff01ff2a3b"
                   or candidate.get("candidate_component_version") != "0.3.5"
                   or candidate.get("canonical_module") != "zog.host_identify.credential_delivery"
-                  or candidate.get("rights_acceptance") != "pending-independent-review"
-                  or candidate.get("consumer_acceptance") != "pending-independent-review"
+                  or candidate.get("rights_acceptance") != "accepted"
+                  or candidate.get("consumer_acceptance") != "accepted"
                   or candidate.get("native_installation_approval") != "not-authorized"
                   or "host-identify==0.3.5" not in runtime["project"]["dependencies"]):
-              raise SystemExit("Host-identify source candidate is not exact or is unexpectedly approved")
+              raise SystemExit("Host-identify source candidate is not exact or source review is missing")
           observed_manifest = subprocess.check_output(
               ["git", "hash-object", "public-companion-pins.json"], text=True).strip()
           if observed_manifest != candidate["accepted_baseline_manifest_blob"]:
@@ -249,7 +249,7 @@ jobs:
           path: dependencies/zog144/host-deploy
           persist-credentials: false
 
-      - name: Read back accepted companion sources and exact pending HTTPS candidate
+      - name: Read back accepted companion sources and exact reviewed HTTPS candidate
         run: |
           python - <<'PY'
           import json
@@ -288,22 +288,27 @@ jobs:
                   raise SystemExit(f"{path} required compatible dependencies not met")
               if "BSD-3-Clause OR GPL-3.0-only" not in (path / "LICENSE").read_text():
                   raise SystemExit(f"{path} missing public first-party license declaration")
-          verify_metadata(discovery_source, "0.4.13", [
-              "host-identify==0.3.5", "host-install==0.14.3"])
-          verify_metadata(install_source, "0.14.3", [])
-          if (candidate["additional_candidates"][1]["candidate_commit"] !=
-                  "6e8b3792c6bc43e6b55dd254892105f7abea5a29"
-                  or candidate["additional_candidates"][1]["correction_parent"] !=
-                  "79ad2b6f72c89acfca998d393664151010db7134"):
-              raise SystemExit("Host-install corrected immutable candidate has drifted")
+          verify_metadata(discovery_source, "0.4.14", [
+              "host-identify==0.3.5", "host-install==0.14.9"])
+          verify_metadata(install_source, "0.14.9", [])
+          reviewed = {item["repository"]: item
+                      for item in candidate["additional_candidates"]}
+          if (reviewed["zog144/host-discover"]["candidate_commit"] !=
+                  "4653cbffcef627dd8945dcb0d14deac5947e97fa"
+                  or reviewed["zog144/host-discover"]["dependency_candidate_commit"] !=
+                  "ed63d8df3cb733192c82b60dd95d13389b9922b5"
+                  or reviewed["zog144/host-install"]["candidate_commit"] !=
+                  "5c03d935be85622789b18559448e1560066d0a37"
+                  or reviewed["zog144/host-install"]["pr_base_commit"] !=
+                  "17e3e0e6b9405a3a81dc25575ba2dadcf6bfa588"):
+              raise SystemExit("Reviewed administrator companion ancestry has drifted")
           module_source = (install_source / "src/zog/host_install/__init__.py").read_text()
-          cli_source = (install_source / "src/zog/host_install/cli.py").read_text()
-          if ('__version__ = "0.14.3"' not in module_source
-                  or 'from . import InstallError, __version__' not in cli_source
-                  or 'version=f"%(prog)s {__version__}"' not in cli_source):
-              raise SystemExit("Corrected host-install source/module/CLI version mismatch")
-          if not (install_source / "tests/test_version_contract.py").is_file():
-              raise SystemExit("Corrected version regression suite absent")
+          if '__version__ = "0.14.9"' not in module_source:
+              raise SystemExit("Reviewed host-install version mismatch")
+          if (not (install_source / "src/zog/host_install/station_admin_password_handoff.py").is_file()
+                  or not (install_source / "src/zog/host_install/station_admin_password_receipt.py").is_file()
+                  or not (install_source / "tests/test_station_admin_password_receipt.py").is_file()):
+              raise SystemExit("Reviewed administrator credential source contract absent")
           PY
 
       - name: Install pinned third-party and Zog components
@@ -327,29 +332,19 @@ jobs:
           import importlib.metadata
           from zog.host_identify import credential_delivery
           assert importlib.metadata.version("host-identify") == "0.3.5"
-          assert importlib.metadata.version("host-discover") == "0.4.13"
-          assert importlib.metadata.version("host-install") == "0.14.3"
+          assert importlib.metadata.version("host-discover") == "0.4.14"
+          assert importlib.metadata.version("host-install") == "0.14.9"
           assert credential_delivery.REQUEST_SCHEMA == "zog-credential-request-v1"
           assert credential_delivery.DELIVERY_ENVELOPE_SCHEMA == "zog-credential-delivery-envelope-v1"
           assert credential_delivery.RECEIPT_SCHEMA == "zog-credential-installation-receipt-v1"
           PY
 
-      - name: Exercise corrected host-install 0.14.3 C1/C2/C3 source regressions
+      - name: Exercise reviewed administrator credential source contracts
         run: |
-          python -m unittest discover -s dependencies/zog144/host-install/tests -p test_version_contract.py -v
-          PYTHONPATH=dependencies/zog144/host-install/tests python -m unittest -v \
-            test_state_device.PlanTests.test_aws_ebs_serial_and_wwn_aliases_resolve_one_whole_disk \
-            test_state_device.PlanTests.test_aws_ebs_alias_mismatch_missing_and_duplicate_whole_disks_fail \
-            test_state_device.PlanTests.test_child_partition_inherited_wwn_does_not_ambiguate_retry \
-            test_state_device.PlanTests.test_aws_provider_binding_cannot_select_running_root
-          python - <<'PY'
-          import subprocess
-          from zog.host_install import __version__
-          assert __version__ == "0.14.3"
-          result = subprocess.run(["host-install", "--version"], check=True,
-                                  capture_output=True, text=True)
-          assert result.stdout.strip() == "host-install 0.14.3"
-          PY
+          python -m pytest -q dependencies/zog144/host-install/tests/test_station_admin_password_receipt.py
+          python -m pytest -q \
+            dependencies/zog144/host-discover/tests/test_credential_delivery_boundary.py \
+            dependencies/zog144/host-discover/tests/test_host_install_014_compatibility.py
 
       - name: Verify actual imported Zog components
         run: |
