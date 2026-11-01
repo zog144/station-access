@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/workflows/administrator-fd-source-exact-head.yml"
       - "tests/host_registry/test_administrator_credential_receiver.py"
+      - "tests/host_registry/administrator_fd_candidate.py"
       - "src/zog/station_access/host_registry/administrator_fd_broker.py"
       - "src/zog/station_access/host_registry/administrator_credential_receiver.py"
   push:
@@ -23,7 +24,8 @@ jobs:
     env:
       STATION_ACCESS_FRONTEND_DIRECTORY: ${{ github.workspace }}/frontend/dist
       ROOT_HEAD: fb65b743397aa690a79e03cd96729a8edb512ccf
-      INSTALL_HEAD: c3f12f567d60b0c8bb3da6084acfff82b98dc007
+      DISCOVER_HEAD: 46d6555346321b6bd6c202997d2fbcf19929d215
+      INSTALL_HEAD: 5c03d935be85622789b18559448e1560066d0a37
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, node24
         with:
@@ -97,6 +99,7 @@ jobs:
                  for item in candidate["additional_candidates"]},
           }
           candidate_overrides["zog144/root-control"] = os.environ["ROOT_HEAD"]
+          candidate_overrides["zog144/host-discover"] = os.environ["DISCOVER_HEAD"]
           candidate_overrides["zog144/host-install"] = os.environ["INSTALL_HEAD"]
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as outputs:
               for repository, label in expected.items():
@@ -199,6 +202,7 @@ jobs:
           }
           import os
           overrides["zog144/root-control"] = os.environ["ROOT_HEAD"]
+          overrides["zog144/host-discover"] = os.environ["DISCOVER_HEAD"]
           overrides["zog144/host-install"] = os.environ["INSTALL_HEAD"]
           for item in handoff["dependencies"]:
               name = item["repository"]
@@ -226,8 +230,8 @@ jobs:
                   raise SystemExit(f"{path} required compatible dependencies not met")
               if "BSD-3-Clause OR GPL-3.0-only" not in (path / "LICENSE").read_text():
                   raise SystemExit(f"{path} missing public first-party license declaration")
-          verify_metadata(discovery_source, "0.4.13", [
-              "host-identify==0.3.5", "host-install==0.14.3"])
+          verify_metadata(discovery_source, "0.4.14", [
+              "host-identify==0.3.5", "host-install==0.14.9"])
           verify_metadata(install_source, "0.14.9", [])
           if (candidate["additional_candidates"][1]["candidate_commit"] !=
                   "6e8b3792c6bc43e6b55dd254892105f7abea5a29"
@@ -251,6 +255,7 @@ jobs:
         run: |
           test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
           test "$(git -C dependencies/zog144/root-control rev-parse HEAD)" = "$ROOT_HEAD"
+          test "$(git -C dependencies/zog144/host-discover rev-parse HEAD)" = "$DISCOVER_HEAD"
           test "$(git -C dependencies/zog144/host-install rev-parse HEAD)" = "$INSTALL_HEAD"
           python tools/check-credential-v1-candidate.py
 
@@ -270,31 +275,12 @@ jobs:
           python -m pip install --no-deps -e dependencies/zog144/certify-manage
           python -m pip install --no-deps -e dependencies/zog144/host-deploy
           python -m pip install --no-deps -e .
-          # Source-only three-owner overlay: host-discover 0.4.13's
-          # historical host-install==0.14.3 pin is not compatible with
-          # selected host-install 0.14.9. This is an explicit native NO-GO;
-          # no other unsatisfied dependency is tolerated by this test lane.
-          python - <<'PY'
-          import subprocess
-          result = subprocess.run(["python", "-m", "pip", "check"],
-                                  text=True, capture_output=True)
-          if result.returncode:
-              known = ("host-discover 0.4.13 has requirement "
-                       "host-install==0.14.3, but you have host-install 0.14.9.")
-              actual = [line.strip() for line in result.stdout.splitlines() if line.strip()]
-              if actual != [known] or result.stderr.strip():
-                  raise SystemExit("Unexpected source overlay dependency mismatch: "
-                                   + repr((actual, result.stderr)))
-              print("SOURCE ONLY: known exact host-discover/host-install "
-                    "version-pin mismatch; native compatibility remains NO-GO.")
-          else:
-              print("Source overlay dependency check passed")
-          PY
+          python -m pip check
           python - <<'PY'
           import importlib.metadata
           from zog.host_identify import credential_delivery
           assert importlib.metadata.version("host-identify") == "0.3.5"
-          assert importlib.metadata.version("host-discover") == "0.4.13"
+          assert importlib.metadata.version("host-discover") == "0.4.14"
           assert importlib.metadata.version("host-install") == "0.14.9"
           assert credential_delivery.REQUEST_SCHEMA == "zog-credential-request-v1"
           assert credential_delivery.DELIVERY_ENVELOPE_SCHEMA == "zog-credential-delivery-envelope-v1"
@@ -309,7 +295,10 @@ jobs:
           from zog.host_install import station_admin_password_receipt as receipt
           assert __version__ == "0.14.9"
           assert callable(handoff.handoff) and callable(handoff.read_committed_reply)
-          assert callable(receipt.inspect)
+          assert callable(receipt.inspect) and callable(receipt.verify_authorization)
+          assert receipt.CONSUMER == "station-access"
+          assert receipt.PURPOSE == "station-access-administrator-password"
+          assert receipt.CREDENTIAL_ID == "station-admin"
           PY
 
       - name: Verify actual imported Zog components
