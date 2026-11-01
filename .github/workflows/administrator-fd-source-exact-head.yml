@@ -24,7 +24,7 @@ jobs:
     env:
       STATION_ACCESS_FRONTEND_DIRECTORY: ${{ github.workspace }}/frontend/dist
       ROOT_HEAD: fb65b743397aa690a79e03cd96729a8edb512ccf
-      DISCOVER_HEAD: 46d6555346321b6bd6c202997d2fbcf19929d215
+      DISCOVER_HEAD: 680c131b6f9d160914cff9c69f27e405d3e43f94
       INSTALL_HEAD: 5c03d935be85622789b18559448e1560066d0a37
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, node24
