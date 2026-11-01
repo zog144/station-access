@@ -1,0 +1,396 @@
+# Source-only protected administrator credential integration, no native authority.
+name: Administrator FD three-owner source contract
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/administrator-fd-source-exact-head.yml"
+      - "tests/host_registry/test_administrator_credential_receiver.py"
+      - "src/zog/station_access/host_registry/administrator_fd_broker.py"
+      - "src/zog/station_access/host_registry/administrator_credential_receiver.py"
+  push:
+    branches: [review/administrator-credential-https-receiver-20261031]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  admin-password-three-owner-source:
+    # Secrets are never exposed to pull requests from forks.
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      STATION_ACCESS_FRONTEND_DIRECTORY: ${{ github.workspace }}/frontend/dist
+      ROOT_HEAD: fb65b743397aa690a79e03cd96729a8edb512ccf
+      INSTALL_HEAD: c3f12f567d60b0c8bb3da6084acfff82b98dc007
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, node24
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6, node24
+        with:
+          python-version: "3.12"
+
+      - name: Verify source-only candidate is distinct from accepted publication pins
+        run: python tools/check-credential-v1-candidate.py
+
+      - name: Verify accepted baseline and explicitly pending HTTPS companion candidate
+        id: pins
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          handoff = json.loads(Path("public-companion-pins.json").read_text())
+          candidate = json.loads(Path("credential-v1-companion-candidate.json").read_text())
+          import subprocess
+          import tomllib
+          original_pin = next(x["commit"] for x in handoff["dependencies"]
+                              if x["repository"] == "zog144/host-identify")
+          runtime = tomllib.loads(Path("pyproject.toml").read_text())
+          if (candidate.get("schema") != "zog-station-credential-v1-companion-candidate-v1"
+                  or candidate.get("status") != "source-candidate-not-accepted"
+                  or candidate.get("repository") != "zog144/host-identify"
+                  or candidate.get("accepted_baseline_commit") != original_pin
+                  or candidate.get("accepted_baseline_manifest") != "public-companion-pins.json"
+                  or candidate.get("candidate_commit") != "4a176373ff4cb47a66a8ab1b5fd3d6ff01ff2a3b"
+                  or candidate.get("candidate_component_version") != "0.3.5"
+                  or candidate.get("canonical_module") != "zog.host_identify.credential_delivery"
+                  or candidate.get("rights_acceptance") != "pending-independent-review"
+                  or candidate.get("consumer_acceptance") != "pending-independent-review"
+                  or candidate.get("native_installation_approval") != "not-authorized"
+                  or "host-identify==0.3.5" not in runtime["project"]["dependencies"]):
+              raise SystemExit("Host-identify source candidate is not exact or is unexpectedly approved")
+          observed_manifest = subprocess.check_output(
+              ["git", "hash-object", "public-companion-pins.json"], text=True).strip()
+          if observed_manifest != candidate["accepted_baseline_manifest_blob"]:
+              raise SystemExit("Previously accepted companion pin manifest was modified")
+          print("SOURCE CANDIDATE ONLY: host-identify 0.3.5; original accepted evidence unchanged")
+          if (handoff.get("schema") != "zog-station-public-companion-pins-v1" or
+                  handoff.get("status") != "accepted"):
+              raise SystemExit("Public companion pins lack explicit source and compatibility acceptance")
+          expected = {"zog144/host-identify":"host_identify","zog144/host-discover":"host_discover","zog144/host-install":"host_install","zog144/image-build":"image_build","zog144/box-control":"box_control","zog144/root-control":"root_control","zog144/archive-mirror":"archive_mirror","zog144/network-register":"network_register","zog144/host-deploy":"host_deploy","zog144/certify-manage":"certify_manage"}
+          dependencies = handoff["dependencies"]
+          if len(dependencies) != len(expected):
+              raise SystemExit("Companion entries must be unique and complete")
+          pinned = {item["repository"]: item["commit"] for item in dependencies}
+          if set(pinned) != set(expected):
+              raise SystemExit("Companion repositories differ from approved scope")
+          for item in dependencies:
+              if (item.get("rights_acceptance") != "accepted"
+                  or item.get("consumer_acceptance") != "accepted"
+                  or not re.fullmatch(r"[0-9a-f]{64}",
+                                     item.get("acceptance_evidence_sha256") or "")):
+                  raise SystemExit("Missing per-companion rights/consumer evidence for " + item["repository"])
+          if set(pinned) != set(expected):
+              raise SystemExit(f"Companion repository set differs: {sorted(set(pinned) ^ set(expected))}")
+          if not all(re.fullmatch(r"[0-9a-f]{40}", sha) for sha in pinned.values()):
+              raise SystemExit("Every companion pin must be a full immutable Git commit")
+          candidate_overrides = {
+              candidate["repository"]: candidate["candidate_commit"],
+              **{item["repository"]: item["candidate_commit"]
+                 for item in candidate["additional_candidates"]},
+          }
+          candidate_overrides["zog144/root-control"] = os.environ["ROOT_HEAD"]
+          candidate_overrides["zog144/host-install"] = os.environ["INSTALL_HEAD"]
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as outputs:
+              for repository, label in expected.items():
+                  print(f"{label}={candidate_overrides.get(repository, pinned[repository])}", file=outputs)
+          PY
+
+
+      - name: Check out zog144/host-identify
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, node24
+        with:
+          repository: zog144/host-identify
+          ref: ${{ steps.pins.outputs.host_identify }}
+          path: dependencies/zog144/host-identify
+          persist-credentials: false
+
+      - name: Check out zog144/host-discover
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, node24
+        with:
+          repository: zog144/host-discover
+          ref: ${{ steps.pins.outputs.host_discover }}
+          path: dependencies/zog144/host-discover
+          persist-credentials: false
+
+      - name: Check out zog144/host-install
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, node24
+        with:
+          repository: zog144/host-install
+          ref: ${{ steps.pins.outputs.host_install }}
+          path: dependencies/zog144/host-install
+          persist-credentials: false
+
+      - name: Check out zog144/image-build
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, node24
+        with:
+          repository: zog144/image-build
+          ref: ${{ steps.pins.outputs.image_build }}
+          path: dependencies/zog144/image-build
+          persist-credentials: false
+
+      - name: Check out zog144/box-control
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, node24
+        with:
+          repository: zog144/box-control
+          ref: ${{ steps.pins.outputs.box_control }}
+          path: dependencies/zog144/box-control
+          persist-credentials: false
+
+      - name: Check out zog144/root-control
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, node24
+        with:
+          repository: zog144/root-control
+          ref: ${{ steps.pins.outputs.root_control }}
+          path: dependencies/zog144/root-control
+          persist-credentials: false
+
+      - name: Check out zog144/archive-mirror
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, node24
+        with:
+          repository: zog144/archive-mirror
+          ref: ${{ steps.pins.outputs.archive_mirror }}
+          path: dependencies/zog144/archive-mirror
+          persist-credentials: false
+
+      - name: Check out zog144/network-register
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, node24
+        with:
+          repository: zog144/network-register
+          ref: ${{ steps.pins.outputs.network_register }}
+          path: dependencies/zog144/network-register
+          persist-credentials: false
+
+      - name: Check out zog144/certify-manage
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, node24
+        with:
+          repository: zog144/certify-manage
+          ref: ${{ steps.pins.outputs.certify_manage }}
+          path: dependencies/zog144/certify-manage
+          persist-credentials: false
+
+      - name: Check out zog144/host-deploy
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5, node24
+        with:
+          repository: zog144/host-deploy
+          ref: ${{ steps.pins.outputs.host_deploy }}
+          path: dependencies/zog144/host-deploy
+          persist-credentials: false
+
+      - name: Read back accepted companion sources and exact pending HTTPS candidate
+        run: |
+          python - <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+          handoff = json.loads(Path("public-companion-pins.json").read_text())
+          candidate = json.loads(Path("credential-v1-companion-candidate.json").read_text())
+          overrides = {
+              candidate["repository"]: candidate["candidate_commit"],
+              **{item["repository"]: item["candidate_commit"]
+                 for item in candidate["additional_candidates"]},
+          }
+          import os
+          overrides["zog144/root-control"] = os.environ["ROOT_HEAD"]
+          overrides["zog144/host-install"] = os.environ["INSTALL_HEAD"]
+          for item in handoff["dependencies"]:
+              name = item["repository"]
+              path = Path("dependencies") / name
+              observed = subprocess.check_output(["git", "-C", str(path), "rev-parse", "HEAD"], text=True).strip()
+              expected = overrides.get(name, item["commit"])
+              if observed != expected:
+                  raise SystemExit(f"Mismatch in {name}: expected {expected}, observed {observed}")
+              print(f"{name}: {observed}" + (" (unaccepted HTTPS candidate)" if name in overrides else ""))
+          host_source = Path("dependencies/zog144/host-identify")
+          if '__version__ = "0.3.5"' not in (host_source / "src/zog/host_identify/__init__.py").read_text():
+              raise SystemExit("host-identify source version is not 0.3.5")
+          if not (host_source / "src/zog/host_identify/credential_delivery.py").is_file():
+              raise SystemExit("Canonical HTTPS credential protocol module absent")
+          if "BSD-3-Clause OR GPL-3.0-only" not in (host_source / "LICENSE").read_text():
+              raise SystemExit("host-identify license grant absent")
+          discovery_source = Path("dependencies/zog144/host-discover")
+          install_source = Path("dependencies/zog144/host-install")
+          def verify_metadata(path, version, required):
+              import tomllib
+              data = tomllib.loads((path / "pyproject.toml").read_text())
+              if data["project"]["version"] != version:
+                  raise SystemExit(f"{path} component version is not {version}")
+              if not set(required) <= set(data["project"].get("dependencies", [])):
+                  raise SystemExit(f"{path} required compatible dependencies not met")
+              if "BSD-3-Clause OR GPL-3.0-only" not in (path / "LICENSE").read_text():
+                  raise SystemExit(f"{path} missing public first-party license declaration")
+          verify_metadata(discovery_source, "0.4.13", [
+              "host-identify==0.3.5", "host-install==0.14.3"])
+          verify_metadata(install_source, "0.14.3", [])
+          if (candidate["additional_candidates"][1]["candidate_commit"] !=
+                  "6e8b3792c6bc43e6b55dd254892105f7abea5a29"
+                  or candidate["additional_candidates"][1]["correction_parent"] !=
+                  "79ad2b6f72c89acfca998d393664151010db7134"):
+              raise SystemExit("Host-install corrected immutable candidate has drifted")
+          module_source = (install_source / "src/zog/host_install/__init__.py").read_text()
+          cli_source = (install_source / "src/zog/host_install/cli.py").read_text()
+          if ('__version__ = "0.14.3"' not in module_source
+                  or 'from . import InstallError, __version__' not in cli_source
+                  or 'version=f"%(prog)s {__version__}"' not in cli_source):
+              raise SystemExit("Corrected host-install source/module/CLI version mismatch")
+          if not (install_source / "tests/test_version_contract.py").is_file():
+              raise SystemExit("Corrected version regression suite absent")
+          PY
+
+      - name: Verify exact source heads and unchanged candidate pin manifest
+        run: |
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+          test "$(git -C dependencies/zog144/root-control rev-parse HEAD)" = "$ROOT_HEAD"
+          test "$(git -C dependencies/zog144/host-install rev-parse HEAD)" = "$INSTALL_HEAD"
+          python tools/check-credential-v1-candidate.py
+
+      - name: Install pinned third-party and Zog components
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -r requirements-security-tested.txt
+          python -m pip install "dbus-next==0.2.3" "dnspython>=2.8,<3"
+          python -m pip install --no-deps -e dependencies/zog144/host-identify
+          python -m pip install --no-deps -e dependencies/zog144/host-discover
+          python -m pip install --no-deps -e dependencies/zog144/host-install
+          python -m pip install --no-deps -e dependencies/zog144/image-build
+          python -m pip install --no-deps -e dependencies/zog144/box-control/box-control
+          python -m pip install --no-deps -e dependencies/zog144/root-control
+          python -m pip install --no-deps -e dependencies/zog144/archive-mirror
+          python -m pip install --no-deps -e dependencies/zog144/network-register
+          python -m pip install --no-deps -e dependencies/zog144/certify-manage
+          python -m pip install --no-deps -e dependencies/zog144/host-deploy
+          python -m pip install --no-deps -e .
+          python -m pip check
+          python - <<'PY'
+          import importlib.metadata
+          from zog.host_identify import credential_delivery
+          assert importlib.metadata.version("host-identify") == "0.3.5"
+          assert importlib.metadata.version("host-discover") == "0.4.13"
+          assert importlib.metadata.version("host-install") == "0.14.3"
+          assert credential_delivery.REQUEST_SCHEMA == "zog-credential-request-v1"
+          assert credential_delivery.DELIVERY_ENVELOPE_SCHEMA == "zog-credential-delivery-envelope-v1"
+          assert credential_delivery.RECEIPT_SCHEMA == "zog-credential-installation-receipt-v1"
+          PY
+
+      - name: Exercise corrected host-install 0.14.3 C1/C2/C3 source regressions
+        run: |
+          python -m unittest discover -s dependencies/zog144/host-install/tests -p test_version_contract.py -v
+          PYTHONPATH=dependencies/zog144/host-install/tests python -m unittest -v \
+            test_state_device.PlanTests.test_aws_ebs_serial_and_wwn_aliases_resolve_one_whole_disk \
+            test_state_device.PlanTests.test_aws_ebs_alias_mismatch_missing_and_duplicate_whole_disks_fail \
+            test_state_device.PlanTests.test_child_partition_inherited_wwn_does_not_ambiguate_retry \
+            test_state_device.PlanTests.test_aws_provider_binding_cannot_select_running_root
+          python - <<'PY'
+          import subprocess
+          from zog.host_install import __version__
+          assert __version__ == "0.14.3"
+          result = subprocess.run(["host-install", "--version"], check=True,
+                                  capture_output=True, text=True)
+          assert result.stdout.strip() == "host-install 0.14.3"
+          PY
+
+      - name: Verify actual imported Zog components
+        run: |
+          python - <<'PY'
+          import importlib
+          from pathlib import Path
+
+          root = (Path.cwd() / "dependencies" / "zog144").resolve()
+          for component in ["host_identify","host_discover","host_install","image_build","box_control","root_control","archive_mirror","network_register","host_deploy","certify_manage"]:
+              module = importlib.import_module("zog." + component)
+              location = Path(module.__file__).resolve()
+              if not location.is_relative_to(root):
+                  raise SystemExit(f"Unexpected module location {component}: {location}")
+              print(f"zog.{component}: {location}")
+          PY
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5, node24
+        with:
+          node-version: "24.19.0"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend assets for Django response tests
+        run: |
+          npm install --global npm@11.9.0
+          npm ci --prefix frontend
+          npm run build --prefix frontend
+
+      - name: Install focused three-owner test runner
+        run: python -m pip install "pytest>=8,<10"
+
+      - name: Check imported owner source paths
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import zog.root_control.administrator_fd as wire
+          from zog.host_install import station_admin_password_handoff as install
+          from zog.station_access.host_registry import administrator_fd_broker as station
+          root = Path.cwd()
+          for module, expected in (
+              (wire, root / "dependencies/zog144/root-control/src"),
+              (install, root / "dependencies/zog144/host-install/src"),
+              (station, root / "src"),
+          ):
+              assert Path(module.__file__).resolve().is_relative_to(expected.resolve()), module
+          PY
+
+      - name: Test real Linux sealed-FD transport and negative peer credentials
+        run: |
+          python -m pytest -q -ra --junitxml=root-admin-fd.xml \
+            dependencies/zog144/root-control/tests/test_administrator_fd.py
+
+      - name: Test installer delivery and source-level recovery identities
+        run: |
+          python -m pytest -q -ra --junitxml=host-admin-receipt.xml \
+            dependencies/zog144/host-install/tests/test_station_admin_password_receipt.py
+
+      - name: Test signed Django password commit and real SCM_RIGHTS same-job integration
+        run: python tools/test-backend.py tests.host_registry.test_administrator_credential_receiver
+
+      - name: Require exact negative security tests, no missing/skipped cases
+        run: |
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          suites = {
+              "root-admin-fd.xml": [
+                  "test_one_verified_sealed_readonly_fd_over_real_unix_seqpacket",
+                  "test_recovery_reply_requires_original_operation_and_no_second_secret",
+                  "test_commit_reply_rejects_missing_passcred_and_wrong_peer_epoch",
+              ],
+              "host-admin-receipt.xml": [
+                  "test_broker_source_handoff_and_recovery_never_authorize_host_receipt",
+                  "test_source_broker_denies_nonroot_caller_root_recipient_and_wrong_purpose",
+              ],
+          }
+          for path, required in suites.items():
+              cases = list(ET.parse(path).iter("testcase"))
+              if not cases or any(c.find(e) is not None for c in cases
+                                  for e in ("skipped", "failure", "error")):
+                  raise SystemExit(f"Required source tests missing or skipped: {path}")
+              for name in required:
+                  if not any(name in case.get("name","") for case in cases):
+                      raise SystemExit(f"Required source test missing: {path}:{name}")
+              print(path, len(cases), "passed; no skips")
+          PY
+
+      - name: Report non-native testing boundary
+        if: always()
+        run: |
+          {
+            echo "## Three-owner admin FD source-only acceptance"
+            echo "- station-access: $(git rev-parse HEAD)"
+            echo "- root-control: $ROOT_HEAD"
+            echo "- host-install: $INSTALL_HEAD"
+            echo "- production approved pins: unchanged"
+            echo "- SCM_RIGHTS sealed FD and real local Linux message credentials: tested"
+            echo "- separate native root/Django process identities and protected listener: NOT tested"
+            echo "- HostIdentity signing, installer state, account mutation live deployment: NOT authorized"
+          } >> "$GITHUB_STEP_SUMMARY"
