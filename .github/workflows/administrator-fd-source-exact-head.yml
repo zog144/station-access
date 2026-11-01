@@ -345,7 +345,11 @@ jobs:
       - name: Check imported owner source paths
         run: |
           python - <<'PY'
+          import os
           from pathlib import Path
+          os.environ.setdefault("DJANGO_SETTINGS_MODULE", "zog.station_access.project.settings")
+          import django
+          django.setup()
           import zog.root_control.administrator_fd as wire
           from zog.host_install import station_admin_password_handoff as install
           from zog.station_access.host_registry import administrator_fd_broker as station
