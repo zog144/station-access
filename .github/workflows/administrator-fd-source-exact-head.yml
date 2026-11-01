@@ -236,12 +236,15 @@ jobs:
               raise SystemExit("Host-install corrected immutable candidate has drifted")
           module_source = (install_source / "src/zog/host_install/__init__.py").read_text()
           cli_source = (install_source / "src/zog/host_install/cli.py").read_text()
+          # PR #11 is 0.14.9: it no longer exposes the older 0.14.3
+          # version flag. Verify this exact candidate's source and tests.
           if ('__version__ = "0.14.9"' not in module_source
-                  or 'from . import InstallError, __version__' not in cli_source
-                  or 'version=f"%(prog)s {__version__}"' not in cli_source):
-              raise SystemExit("Corrected host-install source/module/CLI version mismatch")
-          if not (install_source / "tests/test_version_contract.py").is_file():
-              raise SystemExit("Corrected version regression suite absent")
+                  or 'from . import InstallError' not in cli_source
+                  or 'def main(' not in cli_source):
+              raise SystemExit("Exact admin installer CLI/source mismatch")
+          if (not (install_source / "src/zog/host_install/station_admin_password_handoff.py").is_file()
+                  or not (install_source / "tests/test_station_admin_password_receipt.py").is_file()):
+              raise SystemExit("Exact protected administrator handoff source/tests absent")
           PY
 
       - name: Verify exact source heads and unchanged candidate pin manifest
