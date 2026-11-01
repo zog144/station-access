@@ -372,8 +372,11 @@ jobs:
           python -m pytest -q -ra --junitxml=host-admin-receipt.xml \
             dependencies/zog144/host-install/tests/test_station_admin_password_receipt.py
 
-      - name: Test signed Django password commit and real SCM_RIGHTS same-job integration
+      - name: Test accepted baseline Django administrator security contract
         run: python tools/test-backend.py tests.host_registry.test_administrator_credential_receiver
+
+      - name: Test exact-head native-simulated Django FD transfer, commit and replay denial
+        run: python tools/test-backend.py tests.host_registry.administrator_fd_candidate
 
       - name: Require exact negative security tests, no missing/skipped cases
         run: |
