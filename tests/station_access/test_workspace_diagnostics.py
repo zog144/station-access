@@ -71,13 +71,21 @@ class WorkspaceDiagnosticTests(SimpleTestCase):
     def test_stopped_or_cleanup_pending_runtime_is_not_a_live_success(self):
         with patch("zog.station_access.services.workspace_diagnostics.VncAccessGrant.objects.filter") as query:
             for current in (runtime(state="terminated", terminal=True),
-                            runtime(state="running", cleanup_pending=True),
                             runtime(state="starting")):
                 report = checks(project(workspace(), object(), controller_available=True,
                                         runtime=current, runtime_identity_ok=True, desktop_access=True))
                 assert report["accepted-runtime"]["status"] != "confirmed"
                 assert report["desktop-readiness"]["status"] != "confirmed"
             query.assert_not_called()
+
+    def test_running_runtime_may_retain_cleanup_pending_until_termination(self):
+        with patch("zog.station_access.services.workspace_diagnostics.VncAccessGrant.objects.filter") as query:
+            query.return_value.exists.return_value = False
+            report = checks(project(workspace(), object(), controller_available=True,
+                                    runtime=runtime(state="running", cleanup_pending=True),
+                                    runtime_identity_ok=True, desktop_access=True))
+        assert report["accepted-runtime"]["status"] == "confirmed"
+        assert report["desktop-readiness"]["status"] == "confirmed"
 
     def test_expired_or_missing_grant_stays_unknown_and_does_not_issue_one(self):
         with patch("zog.station_access.services.workspace_diagnostics.VncAccessGrant.objects.filter") as query:
