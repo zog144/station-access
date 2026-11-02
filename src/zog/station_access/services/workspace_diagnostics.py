@@ -126,8 +126,7 @@ def project(workspace, user, *, controller_available, runtime=None,
                 "Independent current X11 authorization evidence is unavailable.", "not-observed")
     rfb = _item("rfb-availability", "unknown", "rfb-not-separately-observed",
                 "Independent current RFB availability evidence is unavailable.", "not-observed")
-    if (stage_evidence is not None and runtime_check["status"] == "confirmed"
-            and desktop["status"] == "confirmed"):
+    if stage_evidence is not None and runtime_check["status"] == "confirmed":
         separate = _separate_stage_checks(stage_evidence, workspace_id=str(workspace.pk),
                                            runtime_id=workspace.runtime_id)
         if separate is not None:
