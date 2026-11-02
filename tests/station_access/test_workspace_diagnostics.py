@@ -1,5 +1,7 @@
 """Fail-closed source regressions for the Workspace diagnostic projection."""
 from types import SimpleNamespace
+from copy import deepcopy
+from time import time
 from unittest.mock import patch
 
 from django.test import SimpleTestCase
@@ -8,7 +10,7 @@ from zog.station_access.services.workspace_diagnostics import project
 
 
 def workspace(**updates):
-    value = dict(runtime_id="desktop-one", endpoint_ready=True, endpoint_revision=7,
+    value = dict(pk="workspace-one", runtime_id="desktop-one", endpoint_ready=True, endpoint_revision=7,
                  vnc_socket="/private/socket", vnc_host=None, vnc_port=None)
     value.update(updates)
     return SimpleNamespace(**value)
@@ -88,3 +90,84 @@ class WorkspaceDiagnosticTests(SimpleTestCase):
                                     runtime=runtime(), runtime_identity_ok=True, desktop_access=True))
             assert "secret" not in str(report)
             assert "/private/path" not in str(report)
+
+
+def proof(**overrides):
+    data = dict(schema="zog-workspace-stage-readiness-v1",
+                workspace_id="workspace-one", desktop_runtime_id="desktop-one",
+                boot_id="current-boot", incarnation="incarnation-one",
+                endpoint_identity="a" * 64, observed_at=time(),
+                x11=dict(status="confirmed", code="ok"),
+                rfb=dict(status="confirmed", code="ok"), advisory=True)
+    data.update(overrides)
+    return data
+
+
+class IndependentStageTests(SimpleTestCase):
+    def observed(self, report):
+        with patch("zog.station_access.services.workspace_diagnostics.VncAccessGrant.objects.filter") as grants:
+            grants.return_value.exists.return_value = False
+            return checks(project(workspace(), object(), controller_available=True,
+                                  runtime=runtime(), runtime_identity_ok=True,
+                                  desktop_access=True, stage_evidence=report))
+
+    def test_exact_current_independent_probes_are_projected(self):
+        entries = self.observed(proof())
+        assert entries["x11-authorization"]["status"] == "confirmed"
+        assert entries["rfb-availability"]["status"] == "confirmed"
+        assert entries["x11-authorization"]["source"] == "current-controller"
+        assert "current X11" in entries["x11-authorization"]["explanation"]
+        assert "a" * 64 not in str(entries)
+
+    def test_rf_b_banner_failure_is_attributed_only_to_rfb(self):
+        entries = self.observed(proof(rfb=dict(status="failed", code="rfb-invalid")))
+        assert entries["x11-authorization"]["status"] == "confirmed"
+        assert entries["rfb-availability"]["status"] == "failed"
+        assert entries["rfb-availability"]["code"] == "rfb-invalid"
+
+    def test_rotated_x11_authority_cancels_both_stage_probes(self):
+        entries = self.observed(proof(
+            x11=dict(status="unknown", code="binding-unavailable"),
+            rfb=dict(status="unknown", code="binding-unavailable")))
+        assert entries["x11-authorization"]["status"] == "unknown"
+        assert entries["rfb-availability"]["status"] == "unknown"
+
+    def test_missing_controller_runtime_and_endpoint_cannot_promote_stage(self):
+        inputs = [
+            dict(controller_available=False, runtime=None, runtime_identity_ok=None, desktop_access=None),
+            dict(controller_available=True, runtime=None, runtime_identity_ok=None, desktop_access=None),
+            dict(controller_available=True, runtime=runtime(), runtime_identity_ok=False, desktop_access=True),
+            dict(controller_available=True, runtime=runtime(), runtime_identity_ok=True, desktop_access=False),
+            dict(controller_available=True, runtime=runtime(state="terminated", terminal=True),
+                 runtime_identity_ok=True, desktop_access=True),
+        ]
+        for item in inputs:
+            with self.subTest(item=item), patch("zog.station_access.services.workspace_diagnostics.VncAccessGrant.objects.filter") as grants:
+                report = checks(project(workspace(), object(), stage_evidence=proof(), **item))
+                assert report["x11-authorization"]["status"] == "unknown"
+                assert report["rfb-availability"]["status"] == "unknown"
+                grants.assert_not_called()
+
+    def test_foreign_replaced_or_stale_evidence_is_all_unknown(self):
+        for change in [
+            dict(desktop_runtime_id="replacement-desktop"),
+            dict(workspace_id="foreign-workspace"),
+            dict(observed_at=time() - 30),
+            dict(observed_at=time() + 30),
+            dict(boot_id=""),
+            dict(incarnation=""),
+            dict(endpoint_identity=None),
+            dict(endpoint_identity="/private/socket"),
+            dict(x11=dict(status="confirmed", code="rfb-invalid")),
+            dict(rfb=dict(status="confirmed", code="private-cookie")),
+            dict(x11=dict(status=["confirmed"], code="ok")),
+            dict(rfb=dict(status="confirmed", code=["ok"])),
+            dict(schema="forged"),
+            dict(advisory=False),
+            dict(private_socket="/private/secret"),
+        ]:
+            with self.subTest(change=change):
+                report = self.observed(proof(**change))
+                assert report["x11-authorization"]["status"] == "unknown"
+                assert report["rfb-availability"]["status"] == "unknown"
+                assert "/private/" not in str(report)
