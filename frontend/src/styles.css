@@ -205,3 +205,18 @@ button:focus-visible, select:focus-visible, input:focus-visible, a:focus-visible
 .workspace-provenance { max-width: 90rem; }
 .provenance-runtime-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:.75rem; flex-wrap:wrap; }
 .provenance-runtime-heading h2 { margin-bottom:.25rem; }
+
+
+/* Fixed-geometry Xvnc viewer: only the browser-facing iframe is transformed.
+   Never use remote desktop resize; inactive session frames remain mounted. */
+.vnc-session-layer { overflow: hidden; }
+.vnc-viewport { position: absolute; inset: 0; overflow: auto; visibility: hidden; pointer-events: none; background: #111; }
+.vnc-viewport.active { visibility: visible; pointer-events: auto; }
+.vnc-scaled-display { position: relative; margin-inline: auto; }
+.vnc-scaled-display .vnc-frame {
+  display: block; position: absolute; inset: auto; left: 0; top: 0;
+  width: 1920px; height: 1080px; transform-origin: top left;
+}
+.vnc-zoom-controls { display: inline-flex; align-items: center; gap: .35rem; flex-wrap: wrap; }
+.vnc-zoom-controls label { display: flex; gap: .3rem; align-items: center; white-space: nowrap; }
+.vnc-zoom-controls output { min-width: 3.5rem; text-align: center; font-variant-numeric: tabular-nums; }
