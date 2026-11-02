@@ -39,7 +39,7 @@ class CredentialV1CandidateTests(unittest.TestCase):
     def test_exact_reviewed_source_set_and_unchanged_accepted_baseline(self):
         self.assertEqual(self.validate(), checker.SOURCE)
         self.assertNotEqual(checker.BASE, checker.SOURCE)
-        self.assertEqual(self.candidate["rights_acceptance"], "accepted")
+        self.assertEqual(self.candidate["rights_acceptance"], "pending-independent-owner-attestation")
         self.assertEqual(self.candidate["consumer_acceptance"], "accepted")
         self.assertEqual(
             self.component("zog144/host-discover")["candidate_commit"],
@@ -51,7 +51,7 @@ class CredentialV1CandidateTests(unittest.TestCase):
     def test_native_publication_or_delivery_approval_is_still_rejected(self):
         for change in (
             {"status": "accepted"},
-            {"rights_acceptance": "pending-independent-review"},
+            {"rights_acceptance": "accepted"},
             {"consumer_acceptance": "pending-independent-review"},
             {"native_installation_approval": "approved"},
             {"publication_approval": "approved"},
@@ -77,7 +77,7 @@ class CredentialV1CandidateTests(unittest.TestCase):
 
         for repository in ("zog144/host-discover", "zog144/host-install"):
             for field, value in (
-                ("rights_acceptance", "pending-independent-review"),
+                ("rights_acceptance", "accepted"),
                 ("consumer_acceptance", "pending-independent-review"),
             ):
                 amended = copy.deepcopy(self.candidate)
