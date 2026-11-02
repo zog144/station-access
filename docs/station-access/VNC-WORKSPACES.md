@@ -76,3 +76,31 @@ The API remains authorized by the existing Workspace ownership check.
 It neither mints a grant, restarts a desktop, nor empowers a diagnostic
 consumer (including future Skiff) to act on an observation as authorization.
 Native source/transport verification is still a separate acceptance gate.
+
+
+## Candidate independent X11/RFB stage evidence (2026-11-02)
+
+Selected immutable **source-only** companions: box-control PR #17 at
+759085385f5a297c7e9f9f11bfbae487b146a600 and root-control PR #25 at
+dedf5d8f1b6c51aa81fe6ceb342a978f3af11566. These are not
+accepted production revisions. The public-companion-pins.json production
+selection remains unchanged.
+
+The optional read-only controller method returns stage proof only for the
+current selected Workspace desktop, boot, incarnation and runtime. Root-control
+independently verifies the current X11 authorization cookie and bounded RFB
+greeting, checks peer identity and rechecks the selected runtime/authority
+snapshot. Box-control validates the complete evidence schema and timestamp,
+then reselects the desktop after probing. Station further requires exact
+Workspace/runtime, nonempty boot/incarnation identity, 64-character opaque
+endpoint identity, a five-second freshness window and allowlisted per-stage
+statuses/codes. It rechecks the selected runtime and aggregate endpoint after
+the optional stage call. The five-stage API never passes private socket paths,
+X11 cookie bytes, RFB greeting bytes, raw errors, or unbounded messages.
+
+A current failed RFB observation may coexist with confirmed X11 authorization.
+If the controller has no method, the boot or authority rotated, the runtime
+was replaced, or any evidence is missing/stale/malformed, the stage status
+remains UNKNOWN. The aggregate desktop-ready flag alone NEVER implies
+X11 or RFB confirmation. Diagnostics grant no authority to launch,
+recover or deliver capabilities. Real native probes remain separately gated.
