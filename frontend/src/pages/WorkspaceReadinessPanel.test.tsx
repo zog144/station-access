@@ -82,3 +82,26 @@ it('does not close another viewer when a stop finishes after navigation', async 
   await Promise.resolve()
   expect(stopped).not.toHaveBeenCalled()
 })
+
+it('renders bounded diagnostics without claiming X11, RFB or browser connection', async () => {
+  const checks = [
+    { condition:'accepted-runtime', status:'confirmed', code:'runtime-running', explanation:'Exact runtime running.', source:'current-controller' },
+    { condition:'desktop-readiness', status:'confirmed', code:'desktop-access-verified', explanation:'Combined endpoint verified.', source:'current-controller' },
+    { condition:'x11-authorization', status:'unknown', code:'x11-not-separately-observed', explanation:'Separate X11 evidence unavailable.', source:'not-observed' },
+    { condition:'rfb-availability', status:'unknown', code:'rfb-not-separately-observed', explanation:'Separate RFB evidence unavailable.', source:'not-observed' },
+    { condition:'browser-grant', status:'unknown', code:'grant-not-verified', explanation:'No live grant verified.', source:'not-observed' },
+  ] as import('../api').WorkspaceDiagnosticCheck[]
+  const read = vi.spyOn(api, 'workspaceReadiness').mockResolvedValueOnce({
+    ...value, diagnostics:{schema:'station-workspace-diagnostics-v1',read_only:true,advisory:true,checks},
+  }).mockRejectedValue(new Error('controller down'))
+  setup()
+  const report = await screen.findByLabelText('Workspace diagnostics')
+  expect(report.textContent).toContain('x11 authorization · unknown')
+  expect(report.textContent).toContain('rfb availability · unknown')
+  expect(report.textContent).toContain('browser grant · unknown')
+  expect(report.textContent).not.toContain('/private/')
+  fireEvent.click(screen.getByRole('button',{name:'Refresh status'}))
+  await waitFor(() => expect(read).toHaveBeenCalledTimes(2))
+  await waitFor(() => expect(report.textContent).toContain('unknown (last: confirmed)'))
+  expect(report.textContent).toContain('Previous observation only')
+})
