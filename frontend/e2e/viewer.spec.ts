@@ -1,6 +1,6 @@
 import {test,expect} from '@playwright/test'
 
-test('real Chromium hit-testing, browser resize, local fit and fixed geometry', async ({page}) => {
+test('real browser iframe hit-testing, browser resize, local fit and fixed geometry', async ({page}) => {
   await page.setViewportSize({width:1024,height:768})
   await page.goto('/e2e/viewer.html#/unused')
   const frame = page.locator('iframe[title="VNC workspace one"]')
