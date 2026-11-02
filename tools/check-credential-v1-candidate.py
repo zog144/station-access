@@ -1,7 +1,7 @@
 """Source-only gate for the independently reviewed canonical credential v1 set.
 
 This never upgrades the separately accepted October 22 publication manifest.
-Source rights/consumer acceptance does not authorize native installation,
+Exact source/consumer compatibility does not establish owner rights or authorize native installation,
 publication, credential delivery, protected pins, or Host receipt signing.
 """
 import hashlib
@@ -58,9 +58,9 @@ def inspect(root=ROOT, *, accepted=None, candidate=None, pyproject=None):
             or candidate.get("candidate_commit") != SOURCE
             or candidate.get("candidate_component_version") != "0.3.5"
             or candidate.get("canonical_module") != "zog.host_identify.credential_delivery"
-            or candidate.get("rights_acceptance") != "accepted"
+            or candidate.get("rights_acceptance") != "pending-independent-owner-attestation"
             or candidate.get("consumer_acceptance") != "accepted"
-            or candidate.get("rights_reviewed_at") != "2026-11-01"
+            or candidate.get("source_reviewed_at") != "2026-11-01"
             or candidate.get("source_provenance") != expected_top_provenance
             or candidate.get("native_installation_approval") != "not-authorized"
             or candidate.get("publication_approval") != "not-authorized"
@@ -115,7 +115,7 @@ def inspect(root=ROOT, *, accepted=None, candidate=None, pyproject=None):
                 or entry.get("accepted_baseline_commit") != expected["old"]
                 or entry.get("candidate_commit") != expected["new"]
                 or entry.get("candidate_component_version") != expected["version"]
-                or entry.get("rights_acceptance") != "accepted"
+                or entry.get("rights_acceptance") != "pending-independent-owner-attestation"
                 or entry.get("consumer_acceptance") != "accepted"
                 or entry.get("native_installation_approval") != "not-authorized"
                 or entry.get("source_provenance") != expected["provenance"]):
@@ -130,4 +130,4 @@ def inspect(root=ROOT, *, accepted=None, candidate=None, pyproject=None):
 
 if __name__ == "__main__":
     inspect()
-    print("Credential v1 source rights/consumer set accepted; native/publication/delivery NO-GO")
+    print("Credential v1 consumer/source compatibility PASS; independent rights and native/publication/delivery PENDING")
