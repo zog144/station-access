@@ -140,7 +140,8 @@ def project(workspace, user, *, controller_available, runtime=None,
 
     grant = _item("browser-grant", "unknown", "grant-not-verified",
                   "No current matching, unexpired browser grant has been verified.", "not-observed")
-    if desktop["status"] == "confirmed" and workspace.endpoint_ready and workspace.runtime_id:
+    if (desktop["status"] == "confirmed" and workspace.endpoint_ready
+            and workspace.desired_running and workspace.runtime_id):
         try:
             # Read-only DB lookup; don't inspect/dereference secret token digests
             # or grant a new capability in a diagnostic endpoint.
