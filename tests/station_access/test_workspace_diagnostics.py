@@ -145,7 +145,6 @@ class IndependentStageTests(SimpleTestCase):
             dict(controller_available=False, runtime=None, runtime_identity_ok=None, desktop_access=None),
             dict(controller_available=True, runtime=None, runtime_identity_ok=None, desktop_access=None),
             dict(controller_available=True, runtime=runtime(), runtime_identity_ok=False, desktop_access=True),
-            dict(controller_available=True, runtime=runtime(), runtime_identity_ok=True, desktop_access=False),
             dict(controller_available=True, runtime=runtime(state="terminated", terminal=True),
                  runtime_identity_ok=True, desktop_access=True),
         ]
@@ -155,6 +154,18 @@ class IndependentStageTests(SimpleTestCase):
                 assert report["x11-authorization"]["status"] == "unknown"
                 assert report["rfb-availability"]["status"] == "unknown"
                 grants.assert_not_called()
+
+    def test_x11_confirmation_and_rfb_failure_survive_unavailable_aggregate_access(self):
+        with patch("zog.station_access.services.workspace_diagnostics.VncAccessGrant.objects.filter") as query:
+            report = checks(project(
+                workspace(), object(), controller_available=True, runtime=runtime(),
+                runtime_identity_ok=True, desktop_access=None,
+                stage_evidence=proof(rfb=dict(status="failed", code="rfb-invalid"))))
+            assert report["accepted-runtime"]["status"] == "confirmed"
+            assert report["desktop-readiness"]["status"] == "unknown"
+            assert report["x11-authorization"]["status"] == "confirmed"
+            assert report["rfb-availability"]["status"] == "failed"
+            query.assert_not_called()
 
     def test_foreign_replaced_or_stale_evidence_is_all_unknown(self):
         for change in [
