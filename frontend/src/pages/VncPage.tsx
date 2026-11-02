@@ -2,7 +2,7 @@ import { WorkspaceReadinessPanel } from './WorkspaceReadinessPanel'
 import { WorkspaceApplicationsPanel } from './WorkspaceApplicationsPanel'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { useVncSessions } from '../vnc/VncSessionProvider'
+import { DEFAULT_VIEWER, useVncSessions } from '../vnc/VncSessionProvider'
 
 export function VncPage() {
   const { workspaceId = '' } = useParams()
@@ -19,7 +19,8 @@ export function VncPage() {
     if (toolbar.current) observer?.observe(toolbar.current)
     return () => { observer?.disconnect(); document.documentElement.style.removeProperty('--workspace-toolbar-height') }
   }, [])
-  const { open, close, has } = useVncSessions()
+  const { open, close, has, preferences, setFit, setZoom } = useVncSessions()
+  const view = preferences[workspaceId] ?? DEFAULT_VIEWER
   const [error, setError] = useState<string | null>(null)
   const [closed, setClosed] = useState(false)
   const [retry, setRetry] = useState(0)
@@ -36,6 +37,13 @@ export function VncPage() {
   return <><section ref={toolbar} className="vnc-toolbar">
     <button aria-expanded={statusVisible} onClick={() => { setShowStatus(!statusVisible); setStatusDismissed(statusVisible); setShowApplications(false) }}>Workspace status</button>
     <button ref={applicationsButton} aria-expanded={showApplications} aria-controls="workspace-applications" onClick={() => { setShowApplications(value => !value); setShowStatus(false) }}>Applications</button>
+    <div className="vnc-zoom-controls" aria-label="Viewer scale controls">
+      <label><input type="checkbox" checked={view.fit} onChange={event => setFit(workspaceId, event.target.checked)} />Fit window</label>
+      <button aria-label="Zoom out" disabled={view.zoom <= 0.5} onClick={() => setZoom(workspaceId, view.zoom - 0.25)}>−</button>
+      <output aria-label="Viewer zoom">{Math.round(view.zoom * 100)}%</output>
+      <button aria-label="Zoom in" disabled={view.zoom >= 2} onClick={() => setZoom(workspaceId, view.zoom + 0.25)}>+</button>
+      <button onClick={() => { setFit(workspaceId, true); setZoom(workspaceId, 1) }}>Reset view</button>
+    </div>
     <Link to="/workspaces">← Workspaces</Link>
     <span>{error ?? (closed ? 'Viewer closed. Closing the viewer does not stop the workspace.' : has(workspaceId) ? 'Viewer stays open while you navigate.' : 'Starting workspace and connecting…')}</span>
     {(error || closed) && <button onClick={() => { setClosed(false); setRetry(value => value + 1) }}>Connect</button>}

@@ -2,16 +2,27 @@ import { createContext, useCallback, useContext, useMemo, useState, useRef, type
 import { api } from '../api'
 
 export type VncSession = { workspaceId: string; novncUrl: string; openedAt: number }
+// Viewer preferences are terminal-local. They never affect Xvnc or the RFB geometry.
+export type ViewerPreferences = { fit: boolean; zoom: number }
+export const DEFAULT_VIEWER: ViewerPreferences = { fit: true, zoom: 1 }
+export const MIN_ZOOM = 0.5
+export const MAX_ZOOM = 2
+export const ZOOM_STEP = 0.25
 type VncContextValue = {
   sessions: VncSession[]
   open: (workspaceId: string) => Promise<void>
   close: (workspaceId: string) => void
   has: (workspaceId: string) => boolean
+  preferences: Record<string, ViewerPreferences>
+  setFit: (workspaceId: string, fit: boolean) => void
+  setZoom: (workspaceId: string, zoom: number) => void
 }
 const VncContext = createContext<VncContextValue | null>(null)
 
 export function VncSessionProvider({ children }: { children: ReactNode }) {
   const [sessions, setSessions] = useState<VncSession[]>([])
+  // Do not discard preferences on close/reconnect; remove only the VNC grant.
+  const [preferences, setPreferences] = useState<Record<string, ViewerPreferences>>({})
   const currentSessions = useRef(sessions)
   currentSessions.current = sessions
   const pending = useRef(new Map<string, Promise<void>>())
@@ -35,12 +46,21 @@ export function VncSessionProvider({ children }: { children: ReactNode }) {
     pending.current.delete(workspaceId)
     setSessions(current => current.filter(s => s.workspaceId !== workspaceId))
   }, [])
+  const setFit = useCallback((workspaceId: string, fit: boolean) => {
+    setPreferences(current => ({ ...current, [workspaceId]: { ...(current[workspaceId] ?? DEFAULT_VIEWER), fit } }))
+  }, [])
+  const setZoom = useCallback((workspaceId: string, zoom: number) => {
+    if (!Number.isFinite(zoom)) return
+    const bounded = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.round(zoom / ZOOM_STEP) * ZOOM_STEP))
+    setPreferences(current => ({ ...current, [workspaceId]: { ...(current[workspaceId] ?? DEFAULT_VIEWER), zoom: bounded } }))
+  }, [])
   const value = useMemo(() => ({
     sessions,
+    preferences, setFit, setZoom,
     open,
     close,
     has: (id: string) => sessions.some(s => s.workspaceId === id),
-  }), [sessions, open, close])
+  }), [sessions, preferences, setFit, setZoom, open, close])
   return <VncContext.Provider value={value}>{children}</VncContext.Provider>
 }
 

@@ -1,0 +1,10 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><style>html,body{margin:0;width:1920px;height:1080px;overflow:hidden}body{background:#193044;color:white;position:relative;}#coordinates{position:absolute;left:20px;top:20px}</style></head><body><output id="coordinates">none</output><script>
+window.__viewerFrameIdentity = Math.random().toString(36).slice(2);
+window.__lastRemotePoint = null;
+window.__pointerCount = 0;
+document.addEventListener('pointerdown', event => {
+ window.__lastRemotePoint = {x: event.clientX, y: event.clientY};
+ window.__pointerCount += 1;
+ document.querySelector('#coordinates').textContent = Math.round(event.clientX)+','+Math.round(event.clientY);
+});
+</script></body></html>

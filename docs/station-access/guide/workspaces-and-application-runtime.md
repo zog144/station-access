@@ -38,3 +38,47 @@ Administrator-only application software inspection validates immutable view/arti
 - [Application software inspection](../APPLICATION-SOFTWARE.md)
 - [Invocation-bound logs](../BOX-CONTROL-LOGS.md)
 - [Workspace provenance](../WORKSPACE-PROVENANCE.md)
+
+
+## Fixed display, local viewer fit and zoom (source candidate)
+
+The first interactive Workspace target uses a generally fixed **1920 × 1080**
+Xvnc display. The browser viewer keeps the same noVNC iframe mounted under
+`PersistentVncSessions` while the user navigates elsewhere, opens application
+drawers, or changes viewer scaling. The iframe's logical viewport remains
+1920 × 1080. Fit window uses only the available browser area and CSS
+`transform: scale(...)`; Zoom ± changes a per-Workspace terminal-local
+magnification factor (50–200%, 25% steps); Reset restores fit and 100%.
+
+No `SetDesktopSize` or Xvnc geometry update is issued by these controls.
+The noVNC URL already uses `resize=scale`, which scales locally instead of
+requesting remote resizing. Browser-native hit testing maps the transformed
+iframe's pointer events to iframe-local coordinates; React does not synthesize
+pointer events or intercept keyboard input. When magnified beyond the available
+browser area, the viewer scrolls locally. Changing browser dimensions recomputes
+the fit factor without replacing the iframe or requesting another grant.
+
+Zoom/fit settings survive navigation and closing/reconnecting the viewer
+within the current authenticated browser session; they do not alter the
+server-side Workspace record or survive a full page reload. This is a source
+UI convention, **not** native proof of the Xvnc process's current display size.
+The eventual native acceptance must verify the actual 1920 × 1080 Xvnc
+configuration and real browser pointer alignment on both Firefox and Chromium.
+
+
+### Cross-browser source regression boundary (2026-11-02)
+
+The GitHub Actions viewer workflow runs two separately bounded Playwright
+jobs, Chromium and Firefox, against the **same** actual React persistent
+iframe component and a same-origin inert HTML iframe with recorded pointer
+coordinates. It does not initialize noVNC, open an RFB socket, generate
+live grants or install Xvnc. It verifies navigation, reconnect, per-Workspace
+zoom, 1920×1080 iframe size and browser resizing. A new iframe pointer event must arrive within **less than one rendered browser CSS pixel** of the transformed target position, measured independently on both axes. Because a fitted 1920×1080 display can have a scale below 1, a fixed one-remote-pixel tolerance is not a meaningful physical hit-testing bound. The test records iframe-local coordinates and converts their error back through the browser's **measured transform scale**. It probes both near and distant targets to reject incorrect scaling or viewport origin.
+The physical-pixel bound is intentional: Gecko and Chromium quantize fractional
+CSS transformed pointer positions differently. At 0.53 fit, one rendered pixel
+spans about 1.88 remote pixels; a 1.5 logical-pixel discrepancy is about 0.8
+rendered pixels, not evidence of a mismapped desktop. The test increments a
+pointer counter to reject stale observations and adds a distant-position
+check to detect incorrect scale or origin. Any error of one rendered pixel or
+more fails; this cannot be relaxed without a new review. Native RFB/grant input handling
+and actual Xvnc display geometry remain separate acceptance gates.
