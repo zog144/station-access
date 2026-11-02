@@ -101,7 +101,13 @@ def _fresh_database():
 
 def _allowed_files(root, *, committed=False):
     allowed = {"controller.lock", "controller-lock-identity.json"}
-    allowed.update(p.name for p in root.glob("dns-review-*.json"))
+    # A filename with the review prefix is not proof that it belongs to
+    # this controller. Validate every retained review before permitting the
+    # bootstrap to proceed, including old and non-selected reviews.
+    for review in root.glob("dns-review-*.json"):
+        key = review.name[len("dns-review-"):-len(".json")]
+        _load_review(root, key)
+        allowed.add(review.name)
     if committed:
         allowed.update({"controller.json", "configuration.json", "empty-bootstrap.json",
                         "network-register"})
