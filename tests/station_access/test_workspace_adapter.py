@@ -217,7 +217,7 @@ class WorkspaceAdapterTests(TestCase):
         response = self.client.get(self.status_url())
         assert response.json()['desktop'] == 'ready'
         checks = {c['condition']: c for c in response.json()['diagnostics']['checks']}
-        assert checks['accepted-runtime']['status'] == 'confirmed'
+        assert checks['accepted-runtime']['status'] == 'confirmed', (checks, data['desktop'], self.workspace.runtime_id)
         assert checks['desktop-readiness']['status'] == 'confirmed'
         assert checks['x11-authorization']['status'] == 'unknown'
         assert checks['rfb-availability']['status'] == 'unknown'
