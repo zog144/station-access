@@ -10,7 +10,7 @@ from zog.station_access.services.workspace_diagnostics import project
 
 
 def workspace(**updates):
-    value = dict(pk="workspace-one", runtime_id="desktop-one", endpoint_ready=True, endpoint_revision=7,
+    value = dict(pk="workspace-one", runtime_id="desktop-one", desired_running=True, endpoint_ready=True, endpoint_revision=7,
                  vnc_socket="/private/socket", vnc_host=None, vnc_port=None)
     value.update(updates)
     return SimpleNamespace(**value)
@@ -67,6 +67,16 @@ class WorkspaceDiagnosticTests(SimpleTestCase):
                 assert report["desktop-readiness"]["status"] != "confirmed"
                 assert report["browser-grant"]["status"] == "unknown"
             query.assert_not_called()
+
+    def test_stopped_intent_cannot_report_a_valid_browser_grant(self):
+        with patch("zog.station_access.services.workspace_diagnostics.VncAccessGrant.objects.filter") as query:
+            query.return_value.exists.return_value = True
+            report = checks(project(workspace(desired_running=False), object(),
+                                    controller_available=True, runtime=runtime(),
+                                    runtime_identity_ok=True, desktop_access=True,
+                                    stage_evidence=proof()))
+        assert report["browser-grant"]["status"] == "unknown"
+        query.assert_not_called()
 
     def test_stopped_or_cleanup_pending_runtime_is_not_a_live_success(self):
         with patch("zog.station_access.services.workspace_diagnostics.VncAccessGrant.objects.filter") as query:
