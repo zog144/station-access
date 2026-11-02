@@ -43,6 +43,13 @@ test('iframe identity survives navigation; zoom and fit survive reconnect per Wo
   await expect(page.getByLabel('Viewer zoom')).toHaveText('125%')
   const scaled = page.locator('.vnc-scaled-display[data-workspace-id="one"]')
   await expect.poll(async () => Number(await scaled.getAttribute('data-local-scale'))).toBeGreaterThan(0.5)
+  // Zoom is a real browser transform: hit-testing must still deliver exact
+  // iframe-local desktop coordinates, not scaled terminal coordinates.
+  const zoomScale = Number(await scaled.getAttribute('data-local-scale'))
+  const zoomBounds = await frame.boundingBox()
+  await page.mouse.click(zoomBounds!.x + 250 * zoomScale,
+                         zoomBounds!.y + 260 * zoomScale)
+  await expect(frame.contentFrame().locator('#coordinates')).toHaveText('250,260')
   await page.getByRole('link',{name:'Away'}).click()
   await expect(page.getByTestId('away')).toBeVisible()
   await expect(frame).toHaveCount(1)
