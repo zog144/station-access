@@ -1,5 +1,6 @@
 """Station services against the real workspace-v1 facade with simulated systemd/image IO."""
 from pathlib import Path
+from dataclasses import replace
 from tempfile import TemporaryDirectory
 from uuid import uuid4
 from unittest.mock import patch
@@ -240,6 +241,58 @@ class WorkspaceAdapterTests(TestCase):
         assert checks['accepted-runtime']['status'] == 'confirmed'
         assert checks['desktop-readiness']['status'] == 'unknown'
         assert checks['desktop-readiness']['code'] == 'desktop-access-unknown'
+
+    def test_readiness_consumes_only_separate_current_controller_stage_proof(self):
+        import time
+        self.ready()
+        original_runtime = self.gateway.get_current_runtime(self.workspace.runtime_id)
+        def evidence(**updates):
+            value = dict(
+                schema="zog-workspace-stage-readiness-v1",
+                workspace_id=str(self.workspace.pk),
+                desktop_runtime_id=self.workspace.runtime_id,
+                boot_id="station-test-boot", incarnation="current-incarnation",
+                endpoint_identity="a" * 64, observed_at=time.time(),
+                x11=dict(status="confirmed", code="ok"),
+                rfb=dict(status="failed", code="rfb-invalid"), advisory=True,
+            )
+            value.update(updates)
+            return value
+        with patch.object(self.gateway, "workspace_desktop_readiness", return_value=evidence()) as reader:
+            response = self.client.get(self.status_url())
+        assert response.status_code == 200
+        rows = {row["condition"]: row for row in response.json()["diagnostics"]["checks"]}
+        assert rows["accepted-runtime"]["status"] == "confirmed", rows
+        assert rows["desktop-readiness"]["status"] == "confirmed"
+        assert rows["x11-authorization"]["status"] == "confirmed"
+        assert rows["rfb-availability"]["status"] == "failed"
+        assert rows["rfb-availability"]["code"] == "rfb-invalid"
+        assert "endpoint_identity" not in response.content.decode()
+        assert "/run/" not in response.content.decode()
+        assert reader.call_count == 1
+
+        # No saved/current controller evidence may substitute for current proof.
+        for invalid in [
+            evidence(observed_at=time.time() - 60),  # stale boot-era proof
+            evidence(endpoint_identity=None),  # root rejected changed auth
+            evidence(desktop_runtime_id="old-desktop"),  # replacement
+            evidence(x11=dict(status="confirmed", code="private-cookie")),
+        ]:
+            with self.subTest(invalid=invalid), patch.object(
+                    self.gateway, "workspace_desktop_readiness", return_value=invalid):
+                rows = {row["condition"]: row for row in self.client.get(self.status_url()).json()["diagnostics"]["checks"]}
+            assert rows["x11-authorization"]["status"] == "unknown"
+            assert rows["rfb-availability"]["status"] == "unknown"
+
+        # Race: selected runtime ends between initial access and second
+        # inspection. Reject previous X11/RFB success without new launch.
+        with patch.object(self.gateway, "workspace_desktop_readiness", return_value=evidence()):
+            with patch.object(self.gateway, "get_current_runtime",
+                              side_effect=[original_runtime,
+                                           replace(original_runtime, state="terminated")]):
+                rows = {row["condition"]: row for row in self.client.get(self.status_url()).json()["diagnostics"]["checks"]}
+        assert rows["x11-authorization"]["status"] == "unknown"
+        assert rows["rfb-availability"]["status"] == "unknown"
 
     def test_readiness_preserves_pending_evidence_when_controller_unavailable(self):
         action = WorkspaceApplicationLaunch.objects.create(workspace=self.workspace, application_name='terminal', request_id='private-request', state='uncertain')
