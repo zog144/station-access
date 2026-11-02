@@ -98,7 +98,7 @@ def project(workspace, user, *, controller_available, runtime=None,
     elif runtime.terminal or runtime.state in ("failed", "terminated"):
         runtime_check = _item("accepted-runtime", "failed", "runtime-ended",
                               "The selected desktop runtime has ended.", "current-controller")
-    elif runtime.state == "running" and not getattr(runtime, "cleanup_pending", False):
+    elif runtime.state == "running" and not runtime.terminal:
         runtime_check = _item("accepted-runtime", "confirmed", "runtime-running",
                               "The controller reports the exact selected desktop runtime running.", "current-controller")
     else:
