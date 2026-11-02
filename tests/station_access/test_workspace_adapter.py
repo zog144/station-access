@@ -294,6 +294,19 @@ class WorkspaceAdapterTests(TestCase):
         assert rows["x11-authorization"]["status"] == "unknown"
         assert rows["rfb-availability"]["status"] == "unknown"
 
+        # Station's own endpoint revision can rotate while root/controller
+        # performs its read-only probe. The returned old proof is not live.
+        def rotate_station_revision(_workspace_id):
+            type(self.workspace).objects.filter(pk=self.workspace.pk).update(
+                endpoint_revision=self.workspace.endpoint_revision + 1)
+            return evidence()
+        with patch.object(self.gateway, "workspace_desktop_readiness",
+                          side_effect=rotate_station_revision):
+            rows = {row["condition"]: row for row in self.client.get(
+                self.status_url()).json()["diagnostics"]["checks"]}
+        assert rows["x11-authorization"]["status"] == "unknown"
+        assert rows["rfb-availability"]["status"] == "unknown"
+
     def test_readiness_preserves_pending_evidence_when_controller_unavailable(self):
         action = WorkspaceApplicationLaunch.objects.create(workspace=self.workspace, application_name='terminal', request_id='private-request', state='uncertain')
         self.workspace.launch_pending = True; self.workspace.launch_request_id = 'old-desktop'; self.workspace.save()
