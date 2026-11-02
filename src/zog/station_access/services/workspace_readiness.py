@@ -104,41 +104,53 @@ def inspect(workspace, gateway, user):
             result["desktop"] = runtime.state if runtime.state in ("running", "failed", "terminated", "starting", "stopping") else "not-verified"
             result["cleanup_pending"] = bool(runtime.terminal and runtime.cleanup_pending)
             if runtime.state == "running":
-                current_socket = controller_workspaces.access(workspace, gateway)
-                # A changed socket is an exact conflict. A saved not-ready
-                # flag is only missing authorization, not a proven mismatch.
-                desktop_access = (False if current_socket != workspace.vnc_socket
-                                  else True if workspace.endpoint_ready else None)
-                if desktop_access is True:
-                    result["desktop"] = "ready"
-                    # Optional source-candidate contract. Never infer independent
-                    # X11/RFB from aggregate access, old controllers or fixtures.
-                    stage_reader = getattr(gateway, "workspace_desktop_readiness", None)
-                    if callable(stage_reader):
-                        try:
-                            candidate = stage_reader(str(workspace.pk))
-                            # A replacement desktop or revoked endpoint after
-                            # the remote probes makes both stages unknown.
-                            later = gateway.get_current_runtime(workspace.runtime_id)
-                            # The station record can change while the independent
-                            # root/controller probe is in flight. Re-read only
-                            # identity/revision fields; never reconcile or mutate.
-                            fields = ("runtime_id", "endpoint_revision", "vnc_socket",
-                                      "controller_schema", "desired_running", "endpoint_ready")
-                            current = type(workspace).objects.filter(pk=workspace.pk).values(*fields).first()
-                            if (current is not None
-                                    and all(current[field] == getattr(workspace, field)
-                                            for field in fields)
-                                    and later is not None and later.runtime_id == runtime.runtime_id
-                                    and later.workspace_id == str(workspace.pk)
-                                    and later.application_name == workspace.application_name
-                                    and later.state == "running" and not later.terminal
-                                    and workspace.endpoint_ready
-                                    and controller_workspaces.access(workspace, gateway) == workspace.vnc_socket):
-                                stage_evidence = candidate
-                        except Exception:
-                            pass
+                try:
+                    current_socket = controller_workspaces.access(workspace, gateway)
+                    # Missing aggregate desktop access does not erase separately
+                    # attributable X11/RFB evidence for the selected runtime.
+                    desktop_access = (False if current_socket != workspace.vnc_socket
+                                      else True if workspace.endpoint_ready else None)
+                    if desktop_access is True:
+                        result["desktop"] = "ready"
+                except Exception:
+                    pass
         except Exception:
-            # A running process is distinct from a verified X11/RFB endpoint.
+            # The stored running intent is not a live runtime observation.
             pass
+
+    # Independent stage source proof is inspected separately from aggregate
+    # desktop access, which may fail precisely because RFB is unavailable.
+    # Never use the combined desktop-ready flag to synthesize either stage.
+    if (workspace.controller_schema == controller_workspaces.SCHEMA
+            and workspace.desired_running and workspace.runtime_id
+            and runtime_observation is not None and runtime_identity_ok is True
+            and runtime_observation.state == "running"
+            and not runtime_observation.terminal):
+        stage_reader = getattr(gateway, "workspace_desktop_readiness", None)
+        if callable(stage_reader):
+            try:
+                candidate = stage_reader(str(workspace.pk))
+                later = gateway.get_current_runtime(workspace.runtime_id)
+                # Check local immutable intent and grant revision again:
+                # station may have changed during the controller's probes.
+                fields = ("runtime_id", "endpoint_revision", "vnc_socket",
+                          "controller_schema", "desired_running", "endpoint_ready")
+                current = type(workspace).objects.filter(pk=workspace.pk).values(*fields).first()
+                # Only recheck aggregate access if it had been independently
+                # confirmed before probing. Otherwise the stage inspection
+                # remains useful for diagnosing an inaccessible desktop.
+                still_accessible = (desktop_access is not True
+                                    or controller_workspaces.access(workspace, gateway) == workspace.vnc_socket)
+                if (current is not None
+                        and all(current[field] == getattr(workspace, field)
+                                for field in fields)
+                        and still_accessible
+                        and later is not None
+                        and later.runtime_id == runtime_observation.runtime_id
+                        and later.workspace_id == str(workspace.pk)
+                        and later.application_name == workspace.application_name
+                        and later.state == "running" and not later.terminal):
+                    stage_evidence = candidate
+            except Exception:
+                pass
     return finished()
