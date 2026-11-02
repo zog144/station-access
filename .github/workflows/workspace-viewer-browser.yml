@@ -8,9 +8,15 @@ on:
 permissions:
   contents: read
 jobs:
-  chromium-iframe:
+  cross-browser-iframe:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox]
+    env:
+      BROWSER: ${{ matrix.browser }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
@@ -24,17 +30,17 @@ jobs:
       - name: Install isolated browser test runner (no committed npm lock mutation)
         working-directory: frontend
         run: npm install --no-save --package-lock=false @playwright/test@1.56.1
-      - name: Install only Chromium and runner dependencies
+      - name: Install selected browser and runner dependencies
         working-directory: frontend
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps "$BROWSER"
       - name: Run real browser hit-testing and persistent iframe regressions
         working-directory: frontend
-        run: npx playwright test --config e2e/playwright.config.ts
+        run: npx playwright test --config e2e/playwright.config.ts --project="$BROWSER"
       - name: Persist test trace only on failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: workspace-viewer-browser-evidence
+          name: workspace-viewer-${{ matrix.browser }}-evidence
           path: frontend/test-results/
           retention-days: 7
       - name: Scope
