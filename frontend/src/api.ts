@@ -502,11 +502,21 @@ export const cloudApi = {
 }
 
 export type WorkspacePreflight = { status: string; advisory: true; checks: { code: string; title: string; status: string; detail: string }[] }
+export type WorkspaceDiagnosticCheck = {
+  condition: 'accepted-runtime' | 'desktop-readiness' | 'x11-authorization' | 'rfb-availability' | 'browser-grant';
+  status: 'confirmed' | 'failed' | 'unknown'; code: string; explanation: string;
+  source: 'current-controller' | 'saved-record' | 'not-observed'
+}
+export type WorkspaceDiagnostics = {
+  schema: 'station-workspace-diagnostics-v1'; read_only: true; advisory: true;
+  checks: WorkspaceDiagnosticCheck[]
+}
 export type WorkspaceReadiness = {
   observed_at: string; read_only: true; advisory: true; controller: string; desktop: string;
   desktop_runtime_id: string | null; launch_pending: boolean; cleanup_pending: boolean | null;
   registration: string; pending_count: number | null; cleanup_count: number | null;
   launch_actions: NonNullable<WorkspaceApplications['launch_actions']>; preflight: WorkspacePreflight | null;
+  diagnostics?: WorkspaceDiagnostics;
 }
 
 export type DestinationSummary = {label:string;server:string;enabled:boolean;revision:number;custom_ca?:boolean;ca_sha256?:string|null}
