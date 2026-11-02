@@ -38,3 +38,29 @@ Administrator-only application software inspection validates immutable view/arti
 - [Application software inspection](../APPLICATION-SOFTWARE.md)
 - [Invocation-bound logs](../BOX-CONTROL-LOGS.md)
 - [Workspace provenance](../WORKSPACE-PROVENANCE.md)
+
+
+## Fixed display, local viewer fit and zoom (source candidate)
+
+The first interactive Workspace target uses a generally fixed **1920 × 1080**
+Xvnc display. The browser viewer keeps the same noVNC iframe mounted under
+`PersistentVncSessions` while the user navigates elsewhere, opens application
+drawers, or changes viewer scaling. The iframe's logical viewport remains
+1920 × 1080. Fit window uses only the available browser area and CSS
+`transform: scale(...)`; Zoom ± changes a per-Workspace terminal-local
+magnification factor (50–200%, 25% steps); Reset restores fit and 100%.
+
+No `SetDesktopSize` or Xvnc geometry update is issued by these controls.
+The noVNC URL already uses `resize=scale`, which scales locally instead of
+requesting remote resizing. Browser-native hit testing maps the transformed
+iframe's pointer events to iframe-local coordinates; React does not synthesize
+pointer events or intercept keyboard input. When magnified beyond the available
+browser area, the viewer scrolls locally. Changing browser dimensions recomputes
+the fit factor without replacing the iframe or requesting another grant.
+
+Zoom/fit settings survive navigation and closing/reconnecting the viewer
+within the current authenticated browser session; they do not alter the
+server-side Workspace record or survive a full page reload. This is a source
+UI convention, **not** native proof of the Xvnc process's current display size.
+The eventual native acceptance must verify the actual 1920 × 1080 Xvnc
+configuration and real browser pointer alignment on both Firefox and Chromium.
