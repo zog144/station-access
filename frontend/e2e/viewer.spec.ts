@@ -1,10 +1,16 @@
 import {test,expect} from '@playwright/test'
-
 import type { FrameLocator } from '@playwright/test'
 
 // Chromium and Gecko can round subpixel CSS transform hit-testing to
 // adjacent logical coordinates. Require a fresh pointer event no farther
 // than one remote-display pixel from the intended 1920x1080 grid point.
+async function clickRemotePixel(inside: FrameLocator, x: number, y: number) {
+  // Use Playwright's frame-local coordinate conversion, not parent-window
+  // boundingBox + a separately rounded React scale. Aim at the center of a
+  // remote logical pixel to avoid hit-testing exactly on a pixel boundary.
+  await inside.locator('body').click({position: {x: x + 0.5, y: y + 0.5}})
+}
+
 async function expectFreshRemotePointer(inside: FrameLocator, x: number, y: number, count: number) {
   await expect.poll(async () => {
     const seen = await inside.locator('body').evaluate(() => ({
@@ -12,7 +18,7 @@ async function expectFreshRemotePointer(inside: FrameLocator, x: number, y: numb
       count: (window as any).__pointerCount,
     }))
     if (seen.count !== count || !seen.point) return Infinity
-    return Math.max(Math.abs(seen.point.x - x), Math.abs(seen.point.y - y))
+    return Math.max(Math.abs(seen.point.x - (x + 0.5)), Math.abs(seen.point.y - (y + 0.5)))
   }).toBeLessThanOrEqual(1)
 }
 
@@ -34,15 +40,16 @@ test('real browser iframe hit-testing, browser resize, local fit and fixed geome
   expect(rect!.height).toBeCloseTo(1080 * scale,0)
 
   const expected = {x:320,y:300}
-  await page.mouse.click(rect!.x+expected.x*scale,rect!.y+expected.y*scale)
   const inside = page.frameLocator('iframe[title="VNC workspace one"]')
+  await clickRemotePixel(inside, expected.x, expected.y)
   await expectFreshRemotePointer(inside, 320, 300, 1)
 
   await page.setViewportSize({width:1440,height:900})
   await expect.poll(async () => Number(await stage.getAttribute('data-local-scale'))).toBeGreaterThan(scale)
   const resizedScale = Number(await stage.getAttribute('data-local-scale'))
   const next = await frame.boundingBox()
-  await page.mouse.click(next!.x+320*resizedScale,next!.y+300*resizedScale)
+  expect(next!.width).toBeCloseTo(1920 * resizedScale, 0)
+  await clickRemotePixel(inside, 320, 300)
   await expectFreshRemotePointer(inside, 320, 300, 2)
   expect(await frame.getAttribute('src')).toContain('resize=scale')
   expect(await frame.getAttribute('src')).not.toContain('resize=remote')
@@ -64,8 +71,8 @@ test('iframe identity survives navigation; zoom and fit survive reconnect per Wo
   // iframe-local desktop coordinates, not scaled terminal coordinates.
   const zoomScale = Number(await scaled.getAttribute('data-local-scale'))
   const zoomBounds = await frame.boundingBox()
-  await page.mouse.click(zoomBounds!.x + 250 * zoomScale,
-                         zoomBounds!.y + 260 * zoomScale)
+  expect(zoomBounds!.width).toBeCloseTo(1920 * zoomScale, 0)
+  await clickRemotePixel(frame.contentFrame(), 250, 260)
   await expectFreshRemotePointer(frame.contentFrame(), 250, 260, 1)
   await page.getByRole('link',{name:'Away'}).click()
   await expect(page.getByTestId('away')).toBeVisible()
