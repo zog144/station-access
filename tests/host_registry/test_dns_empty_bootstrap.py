@@ -138,6 +138,13 @@ class EmptySharedBootstrapTests(TestCase):
                     refresh=lambda *args: (_ for _ in ()).throw(AssertionError("DNS read attempted")))
             self.assertEqual(outcome, {})
             apply.assert_not_called()
+            # Explicit arbitrary target cannot turn an empty selection into
+            # a DNS publication. No provider engine action is called.
+            with patch.object(engine, "apply", side_effect=AssertionError("DNS write attempted")) as apply:
+                with self.assertRaises(NetworkError):
+                    dns_shared.reconcile_runtime(selected, source, engine,
+                                                 resource_ids=["00000000-0000-0000-0000-000000000001"])
+                apply.assert_not_called()
         self.assertEqual(bootstrap.inspect(owner=self.admin.pk,
                                            review_id=proposal["review_id"])["writer"], "shared")
         again = self.commit(proposal)
