@@ -204,6 +204,8 @@ class WorkspaceAdapterTests(TestCase):
         assert response.status_code == 200 and response['Cache-Control'] == 'no-store'
         data = response.json()
         assert data['controller'] == 'available' and data['desktop'] == 'not-verified'
+        assert data['diagnostics']['read_only'] is True
+        assert all(c['status'] == 'unknown' for c in data['diagnostics']['checks'])
         assert any(c['code'] == 'unknown-workspace' for c in data['preflight']['checks'])
         self.workspace.refresh_from_db()
         assert self.workspace.updated_at == before and not self.workspace.controller_schema
@@ -214,12 +216,20 @@ class WorkspaceAdapterTests(TestCase):
         self.ready()
         response = self.client.get(self.status_url())
         assert response.json()['desktop'] == 'ready'
+        checks = {c['condition']: c for c in response.json()['diagnostics']['checks']}
+        assert checks['accepted-runtime']['status'] == 'confirmed'
+        assert checks['desktop-readiness']['status'] == 'confirmed'
+        assert checks['x11-authorization']['status'] == 'unknown'
+        assert checks['rfb-availability']['status'] == 'unknown'
+        assert checks['browser-grant']['status'] == 'unknown'
         assert response.json()['cleanup_pending'] is False and response.json()['cleanup_count'] == 0
         assert '/run/' not in response.content.decode() and 'vnc_endpoint' not in response.content.decode()
         assert len(self.transport.started) == 1
         with patch.object(self.gateway, 'workspace_desktop_access', side_effect=RuntimeError('secret /private')):
             data = self.client.get(self.status_url()).json()
         assert data['desktop'] == 'running'
+        assert next(c for c in data['diagnostics']['checks'] if c['condition'] == 'desktop-readiness')['status'] == 'unknown'
+        assert 'secret' not in str(data['diagnostics'])
 
     def test_readiness_preserves_pending_evidence_when_controller_unavailable(self):
         action = WorkspaceApplicationLaunch.objects.create(workspace=self.workspace, application_name='terminal', request_id='private-request', state='uncertain')
@@ -228,6 +238,7 @@ class WorkspaceAdapterTests(TestCase):
             response = self.client.get(self.status_url())
         data = response.json()
         assert data['controller'] == 'unavailable' and data['pending_count'] is None
+        assert all(c['status'] == 'unknown' for c in data['diagnostics']['checks'])
         assert data['registration'] == 'legacy-recovery-required' and data['launch_pending']
         assert data['launch_actions'][0]['id'] == str(action.pk)
         assert 'private' not in response.content.decode() and 'old-desktop' not in response.content.decode()
