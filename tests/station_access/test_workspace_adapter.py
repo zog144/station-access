@@ -271,6 +271,21 @@ class WorkspaceAdapterTests(TestCase):
         assert "/run/" not in response.content.decode()
         assert reader.call_count == 1
 
+        # The aggregate desktop access probe may fail due to the RFB
+        # endpoint, while independently selected X11 succeeds. Preserve the
+        # stage distinction without confirming browser access or a grant.
+        with patch.object(self.gateway, "workspace_desktop_readiness", return_value=evidence()):
+            with patch("zog.station_access.services.workspace_readiness.controller_workspaces.access",
+                       side_effect=RuntimeError("private RFB path")):
+                data = self.client.get(self.status_url()).json()
+        rows = {row["condition"]: row for row in data["diagnostics"]["checks"]}
+        assert data["desktop"] == "running"
+        assert rows["desktop-readiness"]["status"] == "unknown"
+        assert rows["x11-authorization"]["status"] == "confirmed"
+        assert rows["rfb-availability"]["status"] == "failed"
+        assert rows["browser-grant"]["status"] == "unknown"
+        assert "private RFB path" not in str(data)
+
         # No saved/current controller evidence may substitute for current proof.
         for invalid in [
             evidence(observed_at=time.time() - 60),  # stale boot-era proof
