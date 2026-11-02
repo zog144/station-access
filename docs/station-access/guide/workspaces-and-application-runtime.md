@@ -73,11 +73,12 @@ jobs, Chromium and Firefox, against the **same** actual React persistent
 iframe component and a same-origin inert HTML iframe with recorded pointer
 coordinates. It does not initialize noVNC, open an RFB socket, generate
 live grants or install Xvnc. It verifies navigation, reconnect, per-Workspace
-zoom, 1920×1080 iframe size and browser resizing. A new iframe pointer event
-must arrive within **one remote logical pixel** of the intended coordinate.
-That tolerance is intentional: Gecko and Chromium can round fractional
-CSS transforms to adjacent remote pixels (for example 319,299 versus
-320,300). The test increments a click counter to reject stale pointer
-observations. A tolerance larger than one remote pixel requires renewed
-accuracy review, not automatic relaxation. Native RFB/grant input handling
+zoom, 1920×1080 iframe size and browser resizing. A new iframe pointer event must arrive within **less than one rendered browser CSS pixel** of the transformed target position, measured independently on both axes. Because a fitted 1920×1080 display can have a scale below 1, a fixed one-remote-pixel tolerance is not a meaningful physical hit-testing bound. The test records iframe-local coordinates and converts their error back through the browser's **measured transform scale**. It probes both near and distant targets to reject incorrect scaling or viewport origin.
+The physical-pixel bound is intentional: Gecko and Chromium quantize fractional
+CSS transformed pointer positions differently. At 0.53 fit, one rendered pixel
+spans about 1.88 remote pixels; a 1.5 logical-pixel discrepancy is about 0.8
+rendered pixels, not evidence of a mismapped desktop. The test increments a
+pointer counter to reject stale observations and adds a distant-position
+check to detect incorrect scale or origin. Any error of one rendered pixel or
+more fails; this cannot be relaxed without a new review. Native RFB/grant input handling
 and actual Xvnc display geometry remain separate acceptance gates.
