@@ -2,6 +2,7 @@
 from django.utils import timezone
 from . import controller_workspaces
 from .workspace_applications import launch_actions
+from .workspace_diagnostics import project as diagnostic_project
 
 # Controller exception/message text can contain paths, parameters and secrets.
 # Only known check codes and locally authored explanations cross the browser API.
@@ -62,13 +63,27 @@ def inspect(workspace, gateway, user):
                   registration="recorded" if workspace.controller_schema else "not-recorded",
                   pending_count=None, cleanup_count=None,
                   launch_actions=launch_actions(workspace, user), preflight=None)
+    controller_available = False
+    runtime_observation = None
+    runtime_identity_ok = None
+    desktop_access = None
+
+    def finished():
+        result["diagnostics"] = diagnostic_project(
+            workspace, user, controller_available=controller_available,
+            runtime=runtime_observation, runtime_identity_ok=runtime_identity_ok,
+            desktop_access=desktop_access,
+        )
+        return result
+
     if not workspace.controller_schema and (workspace.launch_request_id or workspace.runtime_id or workspace.launch_pending):
         result["registration"] = "legacy-recovery-required"
     try:
         gateway.require_workspace_contract()
         result["controller"] = "available"
+        controller_available = True
     except Exception:
-        return result
+        return finished()
     result["preflight"] = preflight(workspace, gateway, workspace.application_name)
     if workspace.controller_schema == controller_workspaces.SCHEMA:
         try:
@@ -80,14 +95,19 @@ def inspect(workspace, gateway, user):
     if workspace.runtime_id:
         try:
             runtime = gateway.get_current_runtime(workspace.runtime_id)
-            if not runtime or runtime.workspace_id != str(workspace.pk) or runtime.application_name != workspace.application_name:
+            runtime_observation = runtime
+            runtime_identity_ok = bool(runtime and runtime.workspace_id == str(workspace.pk)
+                                       and runtime.application_name == workspace.application_name)
+            if not runtime_identity_ok:
                 raise ValueError("Unverified desktop identity")
             result["desktop"] = runtime.state if runtime.state in ("running", "failed", "terminated", "starting", "stopping") else "not-verified"
             result["cleanup_pending"] = bool(runtime.terminal and runtime.cleanup_pending)
             if runtime.state == "running":
-                controller_workspaces.access(workspace, gateway)
-                result["desktop"] = "ready"
+                current_socket = controller_workspaces.access(workspace, gateway)
+                desktop_access = bool(current_socket == workspace.vnc_socket and workspace.endpoint_ready)
+                if desktop_access:
+                    result["desktop"] = "ready"
         except Exception:
             # A running process is distinct from a verified X11/RFB endpoint.
             pass
-    return result
+    return finished()
