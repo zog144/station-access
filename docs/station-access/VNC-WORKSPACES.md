@@ -43,3 +43,36 @@ Migration preserves existing identities/endpoints. Legacy pending launches witho
 recorded parameters require explicit recovery using the original controller; this pass
 does not guess bindings for them. Admin cannot directly edit lifecycle fields or delete
 workspace rows, avoiding orphaned runtimes. Workspace deletion is not implemented.
+
+
+## Read-only readiness diagnostics (candidate)
+
+`GET /api/workspaces/<id>/readiness/` now includes an advisory, read-only
+`diagnostics` projection with five stable conditions:
+`accepted-runtime`, `desktop-readiness`, `x11-authorization`,
+`rfb-availability`, `browser-grant`. Each has a bounded
+`confirmed | failed | unknown` status, allowlisted code, locally authored
+explanation and evidence source. There are no private paths, raw controller
+errors, token digests, mutable grant actions or launch/recovery side effects.
+
+The accepted runtime requires a current matching controller identity and
+running state, not a saved runtime ID. Desktop readiness additionally requires
+a current matching controller access observation and the saved endpoint
+revision's ready state. The current controller desktop access check is
+**aggregate**: it does not return independently authenticated X11 authorization
+and RFB observations. Those two conditions therefore remain **unknown**,
+even when the combined desktop status is `ready`. Do not derive separate
+successes from a saved socket pathname or a synthetic test fixture.
+
+`browser-grant` is confirmed only for an unexpired, nonrevoked DB grant
+matching the exact user, runtime, endpoint and revision **after** the current
+desktop probe succeeds. A valid grant is *not* proof the browser successfully
+connected. The panel labels previous successful observations as stale/unknown
+after polling failure; no previous success is reused as a live observation.
+Future box-control/root-control diagnostics can add independently observed
+X11/RFB stages without changing authority or granting recovery powers.
+
+The API remains authorized by the existing Workspace ownership check.
+It neither mints a grant, restarts a desktop, nor empowers a diagnostic
+consumer (including future Skiff) to act on an observation as authorization.
+Native source/transport verification is still a separate acceptance gate.
