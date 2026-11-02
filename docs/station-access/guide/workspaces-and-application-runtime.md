@@ -64,3 +64,20 @@ server-side Workspace record or survive a full page reload. This is a source
 UI convention, **not** native proof of the Xvnc process's current display size.
 The eventual native acceptance must verify the actual 1920 × 1080 Xvnc
 configuration and real browser pointer alignment on both Firefox and Chromium.
+
+
+### Cross-browser source regression boundary (2026-11-02)
+
+The GitHub Actions viewer workflow runs two separately bounded Playwright
+jobs, Chromium and Firefox, against the **same** actual React persistent
+iframe component and a same-origin inert HTML iframe with recorded pointer
+coordinates. It does not initialize noVNC, open an RFB socket, generate
+live grants or install Xvnc. It verifies navigation, reconnect, per-Workspace
+zoom, 1920×1080 iframe size and browser resizing. A new iframe pointer event
+must arrive within **one remote logical pixel** of the intended coordinate.
+That tolerance is intentional: Gecko and Chromium can round fractional
+CSS transforms to adjacent remote pixels (for example 319,299 versus
+320,300). The test increments a click counter to reject stale pointer
+observations. A tolerance larger than one remote pixel requires renewed
+accuracy review, not automatic relaxation. Native RFB/grant input handling
+and actual Xvnc display geometry remain separate acceptance gates.
