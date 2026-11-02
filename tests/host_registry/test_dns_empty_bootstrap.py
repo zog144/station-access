@@ -130,6 +130,14 @@ class EmptySharedBootstrapTests(TestCase):
                 config, root, collector=VerifiedCollector())
             self.assertEqual(selected.host_ids, ())
             self.assertEqual(engine.store.path, store.path)
+            # A zero-host controller must not even attempt engine planning or
+            # provider publication. This checks the real opened store.
+            with patch.object(engine, "apply", side_effect=AssertionError("DNS write attempted")) as apply:
+                outcome = dns_shared.reconcile_runtime(
+                    selected, source, engine,
+                    refresh=lambda *args: (_ for _ in ()).throw(AssertionError("DNS read attempted")))
+            self.assertEqual(outcome, {})
+            apply.assert_not_called()
         self.assertEqual(bootstrap.inspect(owner=self.admin.pk,
                                            review_id=proposal["review_id"])["writer"], "shared")
         again = self.commit(proposal)
@@ -204,6 +212,24 @@ class EmptySharedBootstrapTests(TestCase):
                 self.commit(candidate)
         self.assertEqual(e.exception.code, "review-expired")
         self.assertFalse((self.root / "empty-bootstrap.json").exists())
+
+    def test_foreign_review_artifact_is_not_a_valid_fresh_controller(self):
+        proposal = self.review()
+        foreign = self.root / "dns-review-forged.json"
+        foreign.write_text('{"schema":1,"kind":"empty-shared-dns-bootstrap"}')
+        foreign.chmod(0o600)
+        with self.assertRaises(bootstrap.EmptyBootstrapError):
+            self.commit(proposal)
+        self.assertFalse((self.root / "controller.json").exists())
+        self.assertFalse((self.root / "configuration.json").exists())
+        foreign.unlink()
+        target = self.root / "foreign-review-target"
+        target.write_text("{}")
+        target.chmod(0o600)
+        foreign.symlink_to(target)
+        with self.assertRaises(bootstrap.EmptyBootstrapError):
+            self.commit(proposal)
+        self.assertFalse((self.root / "controller.json").exists())
 
     def test_foreign_controller_state_blocks_review(self):
         self.root.mkdir(mode=0o700)
