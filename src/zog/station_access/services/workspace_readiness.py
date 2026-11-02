@@ -67,12 +67,13 @@ def inspect(workspace, gateway, user):
     runtime_observation = None
     runtime_identity_ok = None
     desktop_access = None
+    stage_evidence = None
 
     def finished():
         result["diagnostics"] = diagnostic_project(
             workspace, user, controller_available=controller_available,
             runtime=runtime_observation, runtime_identity_ok=runtime_identity_ok,
-            desktop_access=desktop_access,
+            desktop_access=desktop_access, stage_evidence=stage_evidence,
         )
         return result
 
@@ -110,6 +111,24 @@ def inspect(workspace, gateway, user):
                                   else True if workspace.endpoint_ready else None)
                 if desktop_access is True:
                     result["desktop"] = "ready"
+                    # Optional source-candidate contract. Never infer independent
+                    # X11/RFB from aggregate access, old controllers or fixtures.
+                    stage_reader = getattr(gateway, "workspace_desktop_readiness", None)
+                    if callable(stage_reader):
+                        try:
+                            candidate = stage_reader(str(workspace.pk))
+                            # A replacement desktop or revoked endpoint after
+                            # the remote probes makes both stages unknown.
+                            later = gateway.get_current_runtime(workspace.runtime_id)
+                            if (later is not None and later.runtime_id == runtime.runtime_id
+                                    and later.workspace_id == str(workspace.pk)
+                                    and later.application_name == workspace.application_name
+                                    and later.state == "running" and not later.cleanup_pending
+                                    and workspace.endpoint_ready
+                                    and controller_workspaces.access(workspace, gateway) == workspace.vnc_socket):
+                                stage_evidence = candidate
+                        except Exception:
+                            pass
         except Exception:
             # A running process is distinct from a verified X11/RFB endpoint.
             pass
