@@ -175,6 +175,14 @@ class CurrentBoxControlGateway:
         self.require_workspace_contract()
         return self._control.workspace_desktop_access(str(workspace_id))
 
+    def workspace_desktop_readiness(self, workspace_id):
+        """Optional reviewed controller stage-evidence API; no fallback to ready."""
+        self.require_workspace_contract()
+        observer = getattr(self._control, "workspace_desktop_readiness", None)
+        if not callable(observer):
+            raise BoxControlUnavailable("Independent desktop stages unavailable on selected controller")
+        return observer(str(workspace_id))
+
     def delete_registered_workspace(self, workspace_id):
         return self._control.delete_workspace(str(workspace_id))
 
