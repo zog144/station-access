@@ -37,9 +37,9 @@ def controller_lock(config, *, modes=('legacy',)):
     root = Path(config['state_directory'])
     if not root.is_dir() or not (root / 'network-register').is_dir():
         raise OSError('DNS provider state missing; restore it before continuing')
-    with (root / 'controller.lock').open('a') as stream:
-        fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        # Check AFTER acquiring the lock: never use a pre-cutover mode snapshot.
+    from .dns_controller_lock import writer_lock
+    with writer_lock(root):
+        # Check AFTER acquiring the stable lock: never use a pre-cutover snapshot.
         if controller_state(config)['writer'] not in modes:
             raise ValueError('DNS writer is frozen or not authorized for this operation')
         yield root
