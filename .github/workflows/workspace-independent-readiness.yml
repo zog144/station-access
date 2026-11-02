@@ -1,0 +1,79 @@
+name: Independent Workspace X11/RFB source interop
+on:
+  pull_request:
+    paths:
+      - "src/zog/station_access/services/workspace_*.py"
+      - "src/zog/station_access/box_control/**"
+      - "tests/station_access/test_workspace_*"
+      - ".github/workflows/workspace-independent-readiness.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  exact-selected-probes:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          repository: zog144/box-control
+          ref: 759085385f5a297c7e9f9f11bfbae487b146a600
+          path: companions/box-control
+          persist-credentials: false
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          repository: zog144/root-control
+          ref: dedf5d8f1b6c51aa81fe6ceb342a978f3af11566
+          path: companions/root-control
+          persist-credentials: false
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          repository: zog144/zog
+          ref: d47d86b363824c718d9c165124cb55bbed12e0f9
+          path: companions/zog
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Verify immutable candidate source heads without promoting accepted pins
+        run: |
+          test "$(git -C companions/box-control rev-parse HEAD)" = 759085385f5a297c7e9f9f11bfbae487b146a600
+          test "$(git -C companions/root-control rev-parse HEAD)" = dedf5d8f1b6c51aa81fe6ceb342a978f3af11566
+          test "$(git -C companions/zog rev-parse HEAD)" = d47d86b363824c718d9c165124cb55bbed12e0f9
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          pinned=json.loads(Path("public-companion-pins.json").read_text())
+          source={item["repository"]:item["commit"] for item in pinned["dependencies"]}
+          assert source["zog144/box-control"] != "759085385f5a297c7e9f9f11bfbae487b146a600"
+          assert source["zog144/root-control"] != "dedf5d8f1b6c51aa81fe6ceb342a978f3af11566"
+          root=Path("companions/zog/src/zog").resolve()
+          dst=Path(".ci-deps/zog")
+          dst.mkdir(parents=True,exist_ok=True)
+          for item in root.iterdir():
+              if item.name in {"__init__.py","__pycache__","box_control","root_control","station_access"}:
+                  continue
+              if item.is_dir() or (item.is_file() and item.suffix==".py"):
+                  (dst/item.name).symlink_to(item)
+          assert not (dst/"__init__.py").exists()
+          assert (dst/"image_build").is_dir()
+          PY
+      - name: Source-only exact box/root/station diagnostic regression
+        env:
+          DJANGO_SETTINGS_MODULE: zog.station_access.project.settings
+        run: |
+          python -m pip install 'pytest>=8,<10' 'pytest-django>=4.11' 'Django>=5.2,<5.3' 'dbus-next==0.2.3'
+          export PYTHONPATH="$PWD/src:$PWD/companions/box-control/box-control/src:$PWD/companions/root-control/src:$PWD/.ci-deps:$PWD/tests"
+          python -m compileall -q src/zog/station_access/services/workspace_diagnostics.py src/zog/station_access/services/workspace_readiness.py
+          python -m pytest -q -rs tests/station_access/test_workspace_diagnostics.py \
+            companions/box-control/box-control/tests/test_workspace_readiness_evidence.py \
+            companions/root-control/tests/test_workspace_readiness.py
+      - name: Scope
+        if: always()
+        run: echo 'Draft source only; no native X11/RFB proof, activation, grants or pin promotion.' >> "$GITHUB_STEP_SUMMARY"
