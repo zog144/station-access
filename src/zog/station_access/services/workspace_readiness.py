@@ -104,8 +104,11 @@ def inspect(workspace, gateway, user):
             result["cleanup_pending"] = bool(runtime.terminal and runtime.cleanup_pending)
             if runtime.state == "running":
                 current_socket = controller_workspaces.access(workspace, gateway)
-                desktop_access = bool(current_socket == workspace.vnc_socket and workspace.endpoint_ready)
-                if desktop_access:
+                # A changed socket is an exact conflict. A saved not-ready
+                # flag is only missing authorization, not a proven mismatch.
+                desktop_access = (False if current_socket != workspace.vnc_socket
+                                  else True if workspace.endpoint_ready else None)
+                if desktop_access is True:
                     result["desktop"] = "ready"
         except Exception:
             # A running process is distinct from a verified X11/RFB endpoint.
