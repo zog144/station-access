@@ -58,19 +58,19 @@ errors, token digests, mutable grant actions or launch/recovery side effects.
 The accepted runtime requires a current matching controller identity and
 running state, not a saved runtime ID. Desktop readiness additionally requires
 a current matching controller access observation and the saved endpoint
-revision's ready state. The current controller desktop access check is
-**aggregate**: it does not return independently authenticated X11 authorization
-and RFB observations. Those two conditions therefore remain **unknown**,
-even when the combined desktop status is `ready`. Do not derive separate
-successes from a saved socket pathname or a synthetic test fixture.
+revision's ready state. The older controller desktop access check is **aggregate**: it does not return
+independently authenticated X11 authorization and RFB observations. Those two
+conditions remain **unknown** without the separately reviewed current stage
+contract, even when the combined desktop status is `ready`. Do not derive
+separate successes from a saved socket pathname or a synthetic test fixture.
 
 `browser-grant` is confirmed only for an unexpired, nonrevoked DB grant
 matching the exact user, runtime, endpoint and revision **after** the current
 desktop probe succeeds. A valid grant is *not* proof the browser successfully
 connected. The panel labels previous successful observations as stale/unknown
 after polling failure; no previous success is reused as a live observation.
-Future box-control/root-control diagnostics can add independently observed
-X11/RFB stages without changing authority or granting recovery powers.
+The candidate box-control/root-control stage diagnostics supply independent
+X11/RFB observations without changing authority or granting recovery powers.
 
 The API remains authorized by the existing Workspace ownership check.
 It neither mints a grant, restarts a desktop, nor empowers a diagnostic
@@ -94,8 +94,11 @@ snapshot. Box-control validates the complete evidence schema and timestamp,
 then reselects the desktop after probing. Station further requires exact
 Workspace/runtime, nonempty boot/incarnation identity, 64-character opaque
 endpoint identity, a five-second freshness window and allowlisted per-stage
-statuses/codes. It rechecks the selected runtime and aggregate endpoint after
-the optional stage call. The five-stage API never passes private socket paths,
+statuses/codes. It rechecks the selected runtime and saved station endpoint
+revision after the optional stage call. When aggregate desktop access was
+confirmed, it also rechecks that endpoint. Stage evidence remains separately
+useful when aggregate desktop access is unavailable (for example RFB fails)
+while browser-grant readiness remains unknown. The five-stage API never passes private socket paths,
 X11 cookie bytes, RFB greeting bytes, raw errors, or unbounded messages.
 
 A current failed RFB observation may coexist with confirmed X11 authorization.
