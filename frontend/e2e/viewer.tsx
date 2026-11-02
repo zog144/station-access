@@ -1,5 +1,5 @@
 import { createRoot } from 'react-dom/client'
-import { BrowserRouter, Link, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Link, Route, Routes } from 'react-router-dom'
 import { api } from '../src/api'
 import { VncPage } from '../src/pages/VncPage'
 import { VncSessionProvider } from '../src/vnc/VncSessionProvider'
@@ -19,12 +19,12 @@ function TestNavigation() {
   </nav>
 }
 createRoot(document.getElementById('root')!).render(
-  <BrowserRouter><VncSessionProvider>
+  <MemoryRouter initialEntries={['/vnc/one']}><VncSessionProvider>
     <TestNavigation />
     <Routes>
       <Route path="/vnc/:workspaceId" element={<VncPage />} />
       <Route path="/applications" element={<p data-testid="away">Navigated away without unmounting the session</p>} />
     </Routes>
     <PersistentVncSessions />
-  </VncSessionProvider></BrowserRouter>
+  </VncSessionProvider></MemoryRouter>
 )
