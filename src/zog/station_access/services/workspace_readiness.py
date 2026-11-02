@@ -123,7 +123,7 @@ def inspect(workspace, gateway, user):
                             if (later is not None and later.runtime_id == runtime.runtime_id
                                     and later.workspace_id == str(workspace.pk)
                                     and later.application_name == workspace.application_name
-                                    and later.state == "running" and not later.cleanup_pending
+                                    and later.state == "running" and not later.terminal
                                     and workspace.endpoint_ready
                                     and controller_workspaces.access(workspace, gateway) == workspace.vnc_socket):
                                 stage_evidence = candidate
