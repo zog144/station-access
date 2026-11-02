@@ -223,7 +223,7 @@ class EmptySharedBootstrapTests(TestCase):
         self.assertFalse((self.root / "controller.json").exists())
         self.assertFalse((self.root / "configuration.json").exists())
         foreign.unlink()
-        target = self.root / "foreign-review-target"
+        target = self.state / "foreign-review-target"
         target.write_text("{}")
         target.chmod(0o600)
         foreign.symlink_to(target)
