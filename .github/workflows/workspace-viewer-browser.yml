@@ -1,0 +1,42 @@
+name: Fixed-resolution Workspace viewer browser regression
+on:
+  pull_request:
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/workspace-viewer-browser.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  chromium-iframe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: '24.19.0'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --prefix frontend
+      - name: Install isolated browser test runner (no committed npm lock mutation)
+        working-directory: frontend
+        run: npm install --no-save --package-lock=false @playwright/test@1.56.1
+      - name: Install only Chromium and runner dependencies
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Run real browser hit-testing and persistent iframe regressions
+        working-directory: frontend
+        run: npx playwright test --config e2e/playwright.config.ts
+      - name: Persist test trace only on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: workspace-viewer-browser-evidence
+          path: frontend/test-results/
+          retention-days: 7
+      - name: Scope
+        if: always()
+        run: echo 'Same-origin browser fixture; no VNC, Workspace installation, credentials or source-pin promotion.' >> "$GITHUB_STEP_SUMMARY"
