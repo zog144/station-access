@@ -62,8 +62,10 @@ def _separate_stage_checks(raw, *, workspace_id, runtime_id, now=None):
     for key in ("x11", "rfb"):
         entry = raw.get(key)
         if (type(entry) is not dict or set(entry) != {"status", "code"}
-                or entry.get("status") not in STAGE_CODES[key]
-                or entry.get("code") not in STAGE_CODES[key][entry["status"]]):
+                or type(entry.get("status")) is not str
+                or entry["status"] not in STAGE_CODES[key]
+                or type(entry.get("code")) is not str
+                or entry["code"] not in STAGE_CODES[key][entry["status"]]):
             return None
         observations[key] = entry
     return observations
@@ -124,7 +126,8 @@ def project(workspace, user, *, controller_available, runtime=None,
                 "Independent current X11 authorization evidence is unavailable.", "not-observed")
     rfb = _item("rfb-availability", "unknown", "rfb-not-separately-observed",
                 "Independent current RFB availability evidence is unavailable.", "not-observed")
-    if runtime_check["status"] == "confirmed" and desktop["status"] == "confirmed":
+    if (stage_evidence is not None and runtime_check["status"] == "confirmed"
+            and desktop["status"] == "confirmed"):
         separate = _separate_stage_checks(stage_evidence, workspace_id=str(workspace.pk),
                                            runtime_id=workspace.runtime_id)
         if separate is not None:
