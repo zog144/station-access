@@ -120,7 +120,16 @@ def inspect(workspace, gateway, user):
                             # A replacement desktop or revoked endpoint after
                             # the remote probes makes both stages unknown.
                             later = gateway.get_current_runtime(workspace.runtime_id)
-                            if (later is not None and later.runtime_id == runtime.runtime_id
+                            # The station record can change while the independent
+                            # root/controller probe is in flight. Re-read only
+                            # identity/revision fields; never reconcile or mutate.
+                            fields = ("runtime_id", "endpoint_revision", "vnc_socket",
+                                      "controller_schema", "desired_running", "endpoint_ready")
+                            current = type(workspace).objects.filter(pk=workspace.pk).values(*fields).first()
+                            if (current is not None
+                                    and all(current[field] == getattr(workspace, field)
+                                            for field in fields)
+                                    and later is not None and later.runtime_id == runtime.runtime_id
                                     and later.workspace_id == str(workspace.pk)
                                     and later.application_name == workspace.application_name
                                     and later.state == "running" and not later.terminal
