@@ -231,6 +231,16 @@ class WorkspaceAdapterTests(TestCase):
         assert next(c for c in data['diagnostics']['checks'] if c['condition'] == 'desktop-readiness')['status'] == 'unknown'
         assert 'secret' not in str(data['diagnostics'])
 
+    def test_saved_not_ready_flag_is_unknown_not_an_endpoint_mismatch(self):
+        self.ready()
+        self.workspace.endpoint_ready = False
+        self.workspace.save(update_fields=['endpoint_ready'])
+        data = self.client.get(self.status_url()).json()
+        checks = {c['condition']: c for c in data['diagnostics']['checks']}
+        assert checks['accepted-runtime']['status'] == 'confirmed'
+        assert checks['desktop-readiness']['status'] == 'unknown'
+        assert checks['desktop-readiness']['code'] == 'desktop-access-unknown'
+
     def test_readiness_preserves_pending_evidence_when_controller_unavailable(self):
         action = WorkspaceApplicationLaunch.objects.create(workspace=self.workspace, application_name='terminal', request_id='private-request', state='uncertain')
         self.workspace.launch_pending = True; self.workspace.launch_request_id = 'old-desktop'; self.workspace.save()
