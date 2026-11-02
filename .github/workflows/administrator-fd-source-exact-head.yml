@@ -63,7 +63,7 @@ jobs:
                   or candidate.get("candidate_commit") != "4a176373ff4cb47a66a8ab1b5fd3d6ff01ff2a3b"
                   or candidate.get("candidate_component_version") != "0.3.5"
                   or candidate.get("canonical_module") != "zog.host_identify.credential_delivery"
-                  or candidate.get("rights_acceptance") != "accepted"
+                  or candidate.get("rights_acceptance") != "pending-independent-owner-attestation"
                   or candidate.get("consumer_acceptance") != "accepted"
                   or candidate.get("native_installation_approval") != "not-authorized"
                   or "host-identify==0.3.5" not in runtime["project"]["dependencies"]):
