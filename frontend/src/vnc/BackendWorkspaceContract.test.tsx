@@ -21,7 +21,7 @@ import { VncSessionProvider } from './VncSessionProvider'
 const contractPath = process.env.ZOG_WORKSPACE_CONTRACT_JSON
 const run = contractPath ? it : it.skip
 type Scenarios = Record<
-  'current' | 'rfb_recovered' | 'stale_stage' | 'foreign_stage' |
+  'current' | 'rfb_recovered' | 'stale_stage' | 'stage_unavailable' | 'foreign_stage' |
   'runtime_replaced' | 'controller_unavailable',
   WorkspaceReadiness
 >
@@ -56,6 +56,10 @@ run('actual backend API envelope separates current, foreign, stale and saved-gra
     status: 'confirmed', code: 'grant-record-current', source: 'saved-record',
   })
   expect(check(c.stale_stage, 'x11-authorization')?.status).toBe('unknown')
+  expect(check(c.stage_unavailable, 'accepted-runtime')?.status).toBe('confirmed')
+  expect(check(c.stage_unavailable, 'desktop-readiness')?.status).toBe('confirmed')
+  expect(check(c.stage_unavailable, 'x11-authorization')?.status).toBe('unknown')
+  expect(check(c.stage_unavailable, 'browser-grant')?.source).toBe('saved-record')
   expect(check(c.foreign_stage, 'rfb-availability')?.status).toBe('unknown')
   expect(check(c.runtime_replaced, 'accepted-runtime')?.status).not.toBe('confirmed')
   expect(check(c.runtime_replaced, 'browser-grant')?.status).toBe('unknown')
@@ -94,6 +98,8 @@ run('controller replacement and stale proofs never remount the granted iframe or
   expect(screen.getByLabelText('Workspace diagnostics').textContent).toContain('accepted runtime · unknown')
   await next(c.stale_stage)
   expect(screen.getByLabelText('Workspace diagnostics').textContent).toContain('x11 authorization · unknown')
+  await next(c.stage_unavailable)
+  expect(screen.getByLabelText('Workspace diagnostics').textContent).toContain('rfb availability · unknown')
   await next(c.rfb_recovered)
   expect(screen.getByLabelText('Workspace diagnostics').textContent).toContain('rfb availability · confirmed')
   expect(view.container.querySelector('iframe')).toBe(frame)
