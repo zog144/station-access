@@ -128,8 +128,15 @@ def inspect(workspace, gateway, user):
             and not runtime_observation.terminal):
         stage_reader = getattr(gateway, "workspace_desktop_readiness", None)
         if callable(stage_reader):
+            # The optional independent stage reader may be absent or refuse
+            # unsupported controller versions. Its failure alone says
+            # nothing new about an earlier verified aggregate desktop probe.
+            # Still reselect runtime/endpoint to detect a real authority race.
             try:
                 candidate = stage_reader(str(workspace.pk))
+            except Exception:
+                candidate = None
+            try:
                 later = gateway.get_current_runtime(workspace.runtime_id)
                 # Check local immutable intent and grant revision again:
                 # station may have changed during the controller's probes.
