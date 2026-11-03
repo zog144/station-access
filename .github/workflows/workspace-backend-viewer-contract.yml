@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           repository: zog144/station-access
-          ref: d8dec1fcf22ab6ec542dceff57bf3e54777fb6f7
+          ref: c904108da7ac9fce4d7041d2781ef2f901a81b9c
           path: companions/station-readiness
           persist-credentials: false
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
@@ -55,7 +55,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Prove selected source revisions and non-shadowing fallback dependencies
         run: |
-          test "$(git -C companions/station-readiness rev-parse HEAD)" = d8dec1fcf22ab6ec542dceff57bf3e54777fb6f7
+          test "$(git -C companions/station-readiness rev-parse HEAD)" = c904108da7ac9fce4d7041d2781ef2f901a81b9c
           test "$(git -C companions/box-control rev-parse HEAD)" = 759085385f5a297c7e9f9f11bfbae487b146a600
           test "$(git -C companions/root-control rev-parse HEAD)" = dedf5d8f1b6c51aa81fe6ceb342a978f3af11566
           test "$(git -C companions/zog rev-parse HEAD)" = d47d86b363824c718d9c165124cb55bbed12e0f9
