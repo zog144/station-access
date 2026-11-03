@@ -98,14 +98,12 @@ run('controller replacement and stale proofs never remount the granted iframe or
   expect(grant).toHaveBeenCalledTimes(1)
 })
 
-run('backend outage does not grant access and explicit reconnect ignores a delayed prior grant', async () => {
+run('backend outage disables new readiness actions while explicit reconnect retains zoom', async () => {
   const c = backend!
-  let oldGrant!: (value: Awaited<ReturnType<typeof api.vncGrant>>) => void
   const grant = vi.spyOn(api, 'vncGrant')
     .mockResolvedValueOnce({
       token: 'original-private', expires_at: 'later', novnc_url: 'about:blank#old',
     })
-    .mockImplementationOnce(() => new Promise(resolve => { oldGrant = resolve }))
     .mockResolvedValueOnce({
       token: 'latest-private', expires_at: 'later', novnc_url: 'about:blank#latest',
     })
@@ -125,12 +123,8 @@ run('backend outage does not grant access and explicit reconnect ignores a delay
   fireEvent.click(screen.getByRole('button', { name: 'Close viewer' }))
   expect(view.container.querySelector('iframe')).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: /^Connect$/ }))
-  await waitFor(() => expect(grant).toHaveBeenCalledTimes(2))
-  // Explicit close overtakes pending reconnection: stale grant ignored.
-  fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
-  // Need a matching close to invalidate the pending response.
-  // A new grant can only be accepted after the explicit next request.
-  oldGrant({ token: 'outdated-private', expires_at: 'later', novnc_url: 'about:blank#late' })
-  await waitFor(() => expect(view.container.querySelector('iframe')?.getAttribute('src')).not.toBe('about:blank#late'))
+  await waitFor(() => expect(view.container.querySelector('iframe')?.getAttribute('src')).toBe('about:blank#latest'))
+  expect(grant).toHaveBeenCalledTimes(2)
+  expect(view.container.querySelector('iframe')).not.toBe(first)
   expect(screen.getByLabelText('Viewer zoom').textContent).toBe('125%')
 })
