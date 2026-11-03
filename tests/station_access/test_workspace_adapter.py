@@ -299,15 +299,29 @@ class WorkspaceAdapterTests(TestCase):
             assert rows["x11-authorization"]["status"] == "unknown"
             assert rows["rfb-availability"]["status"] == "unknown"
 
+        # Exercise the *actual saved grant* record as well: post-probe
+        # controller replacement must invalidate earlier aggregate desktop
+        # success, not only X11/RFB observations.
+        issue_vnc_grant(self.user, self.workspace, self.gateway)
+        with patch.object(self.gateway, "workspace_desktop_readiness", return_value=evidence()):
+            baseline = self.client.get(self.status_url()).json()
+        baseline_rows = {item["condition"]: item for item in baseline["diagnostics"]["checks"]}
+        assert baseline_rows["desktop-readiness"]["status"] == "confirmed"
+        assert baseline_rows["browser-grant"]["status"] == "confirmed"
+
         # Race: selected runtime ends between initial access and second
-        # inspection. Reject previous X11/RFB success without new launch.
+        # inspection. All aggregate and saved-grant observations must become
+        # unknown without a new launch or grant.
         with patch.object(self.gateway, "workspace_desktop_readiness", return_value=evidence()):
             with patch.object(self.gateway, "get_current_runtime",
                               side_effect=[original_runtime,
                                            replace(original_runtime, state="terminated")]):
-                rows = {row["condition"]: row for row in self.client.get(self.status_url()).json()["diagnostics"]["checks"]}
-        assert rows["x11-authorization"]["status"] == "unknown"
-        assert rows["rfb-availability"]["status"] == "unknown"
+                data = self.client.get(self.status_url()).json()
+        rows = {row["condition"]: row for row in data["diagnostics"]["checks"]}
+        assert data["desktop"] == "not-verified"
+        for condition in ("accepted-runtime", "desktop-readiness",
+                          "x11-authorization", "rfb-availability", "browser-grant"):
+            assert rows[condition]["status"] == "unknown", rows
 
         # Station's own endpoint revision can rotate while root/controller
         # performs its read-only probe. The returned old proof is not live.
@@ -317,10 +331,12 @@ class WorkspaceAdapterTests(TestCase):
             return evidence()
         with patch.object(self.gateway, "workspace_desktop_readiness",
                           side_effect=rotate_station_revision):
-            rows = {row["condition"]: row for row in self.client.get(
-                self.status_url()).json()["diagnostics"]["checks"]}
-        assert rows["x11-authorization"]["status"] == "unknown"
-        assert rows["rfb-availability"]["status"] == "unknown"
+            data = self.client.get(self.status_url()).json()
+        rows = {row["condition"]: row for row in data["diagnostics"]["checks"]}
+        assert data["desktop"] == "not-verified"
+        for condition in ("accepted-runtime", "desktop-readiness",
+                          "x11-authorization", "rfb-availability", "browser-grant"):
+            assert rows[condition]["status"] == "unknown", rows
 
     def test_readiness_preserves_pending_evidence_when_controller_unavailable(self):
         action = WorkspaceApplicationLaunch.objects.create(workspace=self.workspace, application_name='terminal', request_id='private-request', state='uncertain')
