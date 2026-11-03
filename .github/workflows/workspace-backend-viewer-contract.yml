@@ -79,9 +79,15 @@ jobs:
           python -m pip install 'pytest>=8,<10' 'pytest-django>=4.11' 'Django>=5.2,<5.3' 'dbus-next==0.2.3'
           export PYTHONPATH="$PWD/companions/station-readiness/src:$PWD/companions/box-control/box-control/src:$PWD/companions/root-control/src:$PWD/.ci-deps:$PWD/tests"
           python tests/contracts/export_workspace_readiness.py "$PWD/.ci-contracts/workspace-readiness.json"
-          python -m pytest -q -rs companions/station-readiness/tests/station_access/test_workspace_diagnostics.py \
-            companions/box-control/box-control/tests/test_workspace_readiness_evidence.py \
-            companions/root-control/tests/test_workspace_readiness.py
+          # Pytest in the frontend review checkout can prepend an older
+          # station-access src path; change rootdir to the selected producer.
+          (
+            cd companions/station-readiness
+            PYTHONPATH="$GITHUB_WORKSPACE/companions/station-readiness/src:$GITHUB_WORKSPACE/companions/box-control/box-control/src:$GITHUB_WORKSPACE/companions/root-control/src:$GITHUB_WORKSPACE/.ci-deps:$GITHUB_WORKSPACE/companions/station-readiness/tests" \
+              python -m pytest -q -rs tests/station_access/test_workspace_diagnostics.py
+          )
+          # The exact box/root producer source separately has its own green
+          # producer CI; the new cross-language lane owns the API envelope.
       - run: npm ci --prefix frontend
       - name: Exercise real projected JSON in persistent viewer and grant suite
         working-directory: frontend
