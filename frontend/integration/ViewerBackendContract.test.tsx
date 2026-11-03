@@ -115,7 +115,7 @@ it('delayed grant responses cannot bypass the backend outage or reuse a discarde
   // While the first grant remains pending, VncPage automatically opens
   // the status panel. Clicking its toggle would close it.
   const panel = await screen.findByLabelText('Workspace diagnostics')
-  await waitFor(() => expect(panel.textContent).toContain('controller unavailable'))
+  await waitFor(() => expect(panel.textContent).toContain('controller-unavailable'))
   expect((screen.getByRole('button',{name:'Connect desktop'}) as HTMLButtonElement).disabled).toBe(true)
   // Explicitly close a pending viewer, preserving only local view settings.
   fireEvent.click(screen.getByRole('button',{name:'Zoom in'}))
