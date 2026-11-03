@@ -167,3 +167,29 @@ it('late original grant response cannot resurrect a closed or replaced iframe', 
   expect(frame.getAttribute('src')).not.toContain('revision=stale')
   expect(screen.getByLabelText('Stored zoom').textContent).toBe('1.25')
 })
+
+
+it('an explicitly completed desktop stop closes its viewer but never starts replacement access', async () => {
+  vi.spyOn(api,'workspaceReadiness').mockResolvedValue(observation())
+  const authorize = vi.spyOn(api,'vncGrant').mockResolvedValue(grant('before-stop'))
+  const stop = vi.spyOn(api,'stopWorkspace').mockResolvedValue({
+    workspace: {id:'one'} as import('../src/api').Workspace,
+  })
+  render(<App />)
+  const frame = await screen.findByTitle('VNC workspace one')
+  fireEvent.click(screen.getByRole('button',{name:'Zoom in'}))
+  fireEvent.click(screen.getByRole('button',{name:'Workspace status'}))
+  await screen.findByLabelText('Workspace diagnostics')
+  fireEvent.click(screen.getByRole('button',{name:'Stop or cancel desktop'}))
+  expect(stop).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button',{name:'Confirm desktop stop'}))
+  await waitFor(() => expect(screen.queryByTitle('VNC workspace one')).toBeNull())
+  expect(stop).toHaveBeenCalledTimes(1)
+  expect(stop).toHaveBeenCalledWith('one')
+  expect(authorize).toHaveBeenCalledTimes(1)
+  expect(frame.isConnected).toBe(false)
+  expect(screen.getByLabelText('Viewer zoom').textContent).toBe('125%')
+  // Stop completion is an explicit successful mutation, unlike read-only
+  // failed/unknown diagnostic stages. It closes; it does not auto-relaunch.
+  expect(screen.getByText(/Viewer closed/)).toBeTruthy()
+})
