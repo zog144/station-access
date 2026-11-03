@@ -64,6 +64,8 @@ export function inspectDistribution(frontendRoot,{ledgerPath=null,write=false}={
  if(!html.includes(link)) fail('missing generated frontend license link')
  const legal=file(path.join(dist,manifest.licenses)).toString('utf8')
  if(!legal.trim())fail('generated LICENSES file is empty')
+ if(manifest.licenses!=='assets/LICENSES-'+hash(legal).slice(0,12)+'.txt')
+  fail('license filename digest does not match actual emitted legal text')
  for(const item of manifest.first_party_licenses){
   normalize(item.path.replace(/^\.\.\//,''))
   if(!isHex(item.sha256) || hash(file(path.resolve(root,item.path)))!==item.sha256)
@@ -79,14 +81,10 @@ export function inspectDistribution(frontendRoot,{ledgerPath=null,write=false}={
   if(!source || source.status!=='reviewed' || !source.reviewed_terms
      || source.declared_license!==dep.license)
    fail('missing reviewed dependency notice evidence: '+key)
-  if(!Array.isArray(dep.notices) || !dep.notices.length || !equal(dep.notices,source.notices.map(({path,sha256})=>({path,sha256,bytes:undefined})).map(x=>x))){
-   // Compare the source-backed notice identity without assuming every
-   // emitted receipt has the same optional byte-count fields.
-   if(!Array.isArray(dep.notices) || !dep.notices.length
-      || dep.notices.some(note => !source.notices.some(item=>item.path===note.path && item.sha256===note.sha256))
-      || source.notices.some(item=>!dep.notices.some(note=>note.path===item.path && note.sha256===item.sha256)))
+  if(!Array.isArray(dep.notices) || !dep.notices.length ||
+     dep.notices.some(note => !source.notices.some(item=>item.path===note.path && item.sha256===note.sha256)) ||
+     source.notices.some(item => !dep.notices.some(note=>note.path===item.path && note.sha256===item.sha256)))
     fail('missing, changed or extra generated npm notice: '+key)
-  }
   if(!legal.includes('===== '+dep.name+' '+dep.version+' ====='))
    fail('missing included npm package heading: '+key)
   for(const item of dep.notices){
@@ -95,6 +93,14 @@ export function inspectDistribution(frontendRoot,{ledgerPath=null,write=false}={
   }
   const locked=Object.entries(lock.packages).filter(([p,v])=>p && packageName(p)===dep.name && v.version===dep.version && v.resolved===dep.tarball && v.integrity===dep.integrity)
   if(locked.length!==1)fail('missing or ambiguous exact npm lock identity: '+key)
+  for(const notice of dep.notices){
+   const publishedNotice=file(path.join(root,locked[0][0],normalize(notice.path)))
+   if(hash(publishedNotice)!==notice.sha256)
+    fail('missing or modified published npm notice: '+key+'/'+notice.path)
+   const exactText=publishedNotice.toString('utf8')
+   if(!exactText.trim() || !legal.includes('----- Upstream '+notice.path+' (verbatim) -----\n'+exactText+'\n'))
+    fail('reviewed npm notice omitted from generated license asset: '+key+'/'+notice.path)
+  }
   matchedLock.set(locked[0][0],key)
   included.set(key,{name:dep.name,version:dep.version,license:dep.license,
                     lock_path:locked[0][0],tarball:dep.tarball,integrity:dep.integrity,
