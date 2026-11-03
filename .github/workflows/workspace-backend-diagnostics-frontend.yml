@@ -24,13 +24,13 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           repository: zog144/station-access
-          ref: d8dec1fcf22ab6ec542dceff57bf3e54777fb6f7
+          ref: c904108da7ac9fce4d7041d2781ef2f901a81b9c
           path: companions/readiness-pr20
           persist-credentials: false
       - name: Verify source closure and accepted production pins are untouched
         run: |
           test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
-          test "$(git -C companions/readiness-pr20 rev-parse HEAD)" = "d8dec1fcf22ab6ec542dceff57bf3e54777fb6f7"
+          test "$(git -C companions/readiness-pr20 rev-parse HEAD)" = "c904108da7ac9fce4d7041d2781ef2f901a81b9c"
           git diff --exit-code -- public-companion-pins.json
       - name: Execute PR20's real Python inspect and five-stage diagnostic projection
         run: |
