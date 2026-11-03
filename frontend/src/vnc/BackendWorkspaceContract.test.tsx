@@ -5,7 +5,11 @@
  * A missing producer fixture SKIPS this extra cross-owner lane only; dedicated
  * CI requires ZOG_WORKSPACE_CONTRACT_JSON and checks each immutable source.
  */
+// Test-runner-only Node API; the browser application intentionally does not
+// depend on @types/node or expose filesystem access.
+// @ts-ignore -- vite/vitest provides node:fs at test runtime
 import { readFileSync } from 'node:fs'
+declare const process: { env: Record<string, string | undefined> }
 import { afterEach, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
