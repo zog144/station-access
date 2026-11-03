@@ -15,9 +15,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Check out draft readiness PR source
+      - name: Check out exact draft readiness source (not a synthetic PR merge)
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Check out immutable independently tested viewer source
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
@@ -28,6 +29,7 @@ jobs:
           persist-credentials: false
       - name: Assert immutable source selection, do not touch accepted pins
         run: |
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
           test "$(git -C companions/viewer-pr19 rev-parse HEAD)" = 62716629d1b7882f4c9d2ff6014bb1d697bd733f
           test -f frontend/integration/workspace-viewer-readiness.test.tsx
           test -f frontend/src/pages/WorkspaceReadinessPanel.tsx
