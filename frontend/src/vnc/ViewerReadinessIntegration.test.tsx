@@ -94,7 +94,7 @@ it('controller outage makes diagnostics stale without revoking the iframe; expli
   expect(grant).toHaveBeenCalledTimes(1)
   fireEvent.click(screen.getByRole('button', { name: 'Close viewer' }))
   expect(view.container.querySelector('iframe')).toBeNull()
-  fireEvent.click(screen.getByRole('button', { name: 'Connect', exact: true }))
+  fireEvent.click(screen.getByRole('button', { name: /^Connect$/ }))
   await waitFor(() => expect(view.container.querySelector('iframe')?.getAttribute('src')).toBe('about:blank#grant-2'))
   expect(view.container.querySelector('iframe')).not.toBe(first)
   expect(screen.getByLabelText('Viewer zoom').textContent).toBe('125%')
