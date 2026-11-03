@@ -11,8 +11,10 @@ import { VncPage } from '../src/pages/VncPage'
 import { PersistentVncSessions } from '../src/vnc/PersistentVncSessions'
 import { VncSessionProvider } from '../src/vnc/VncSessionProvider'
 
+// The dedicated workflow starts Vitest with frontend/ as its working directory.
+// A Vite-transformed import.meta.url is not a file: URI in the test runner.
 const cases = JSON.parse(readFileSync(
-  new URL('./backend-contract.generated.json', import.meta.url), 'utf8',
+  './integration/backend-contract.generated.json', 'utf8',
 )) as Record<string, WorkspaceReadiness>
 const parts = ['accepted-runtime','desktop-readiness','x11-authorization',
                'rfb-availability','browser-grant'] as const
