@@ -157,14 +157,18 @@ def inspect(workspace, gateway, user):
                     # *earlier aggregate* success. Otherwise the browser-grant
                     # projection could retain a stale "confirmed" DB grant
                     # after the later current-authority check failed.
+                    runtime_observation = None
                     runtime_identity_ok = None
                     desktop_access = None
                     result["desktop"] = "not-verified"
+                    result["cleanup_pending"] = None
             except Exception:
                 # A failed post-probe readback is not merely absent X11/RFB
                 # evidence. Earlier desktop/grant observations cannot be
                 # considered current when the selected authority was lost.
+                runtime_observation = None
                 runtime_identity_ok = None
                 desktop_access = None
                 result["desktop"] = "not-verified"
+                result["cleanup_pending"] = None
     return finished()
