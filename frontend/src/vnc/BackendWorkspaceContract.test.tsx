@@ -117,7 +117,7 @@ run('backend outage disables new readiness actions while explicit reconnect reta
   read.mockResolvedValueOnce(c.controller_unavailable)
   fireEvent.click(screen.getByRole('button', { name: 'Refresh status' }))
   await waitFor(() => expect(screen.getByLabelText('Workspace diagnostics').textContent)
-    .toContain('controller unavailable'))
+    .toContain('controller-unavailable'))
   expect((screen.getByRole('button', { name: 'Connect desktop' }) as HTMLButtonElement).disabled).toBe(true)
   expect(view.container.querySelector('iframe')).toBe(first)
   fireEvent.click(screen.getByRole('button', { name: 'Close viewer' }))
