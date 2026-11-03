@@ -7,6 +7,7 @@ on:
       - ".github/workflows/administrator-fd-source-exact-head.yml"
       - "tests/host_registry/test_administrator_credential_receiver.py"
       - "tests/host_registry/administrator_fd_candidate.py"
+      - "tools/check-administrator-dependency-closure.py"
       - "src/zog/station_access/host_registry/administrator_fd_broker.py"
       - "src/zog/station_access/host_registry/administrator_credential_receiver.py"
   push:
@@ -409,6 +410,10 @@ jobs:
 
       - name: Test exact-head native-simulated Django FD transfer, commit and replay denial
         run: python tools/test-backend.py tests.host_registry.administrator_fd_candidate
+
+      - name: Require unconditional installed-wheel pip check after administrator receiver tests
+        run: |
+          python tools/check-administrator-dependency-closure.py
 
       - name: Require exact negative security tests, no missing/skipped cases
         run: |
