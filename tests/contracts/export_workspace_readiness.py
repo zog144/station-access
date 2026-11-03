@@ -98,6 +98,8 @@ class Gateway:
     def workspace_desktop_readiness(self, workspace_id):
         assert workspace_id == "workspace-one"
         self.stage_checks += 1
+        if isinstance(self.stage_data, Exception):
+            raise self.stage_data
         return self.stage_data
 
 
@@ -130,6 +132,8 @@ def main(destination):
         "rfb_recovered": scenario(
             stage_data=stage(rfb={"status": "confirmed", "code": "ok"}), grant=True),
         "stale_stage": scenario(stage_data=stage(observed_at=STAMP-30), grant=False),
+        "stage_unavailable": scenario(
+            stage_data=RuntimeError("private independent probe unavailable"), grant=True),
         "foreign_stage": scenario(
             stage_data=stage(desktop_runtime_id="other-desktop"), grant=False),
         "runtime_replaced": scenario(stage_data=stage(), replaced=True, grant=False),
@@ -141,6 +145,10 @@ def main(destination):
     assert check("current","rfb-availability")["status"] == "failed"
     assert check("current","browser-grant")["source"] == "saved-record"
     assert check("stale_stage","x11-authorization")["status"] == "unknown"
+    assert check("stage_unavailable","accepted-runtime")["status"] == "confirmed"
+    assert check("stage_unavailable","desktop-readiness")["status"] == "confirmed"
+    assert check("stage_unavailable","rfb-availability")["status"] == "unknown"
+    assert check("stage_unavailable","browser-grant")["source"] == "saved-record"
     assert check("foreign_stage","rfb-availability")["status"] == "unknown"
     assert all(c["status"] == "unknown" for c in items["controller_unavailable"]["diagnostics"]["checks"])
     # A *replaced* runtime must not be represented as current despite the
