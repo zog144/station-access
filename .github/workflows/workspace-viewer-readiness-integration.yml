@@ -1,0 +1,60 @@
+name: Workspace viewer and readiness candidate integration
+on:
+  pull_request:
+    paths:
+      - 'frontend/integration/**'
+      - 'frontend/src/pages/WorkspaceReadinessPanel*'
+      - 'frontend/src/api.ts'
+      - 'frontend/package.json'
+      - '.github/workflows/workspace-viewer-readiness-integration.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  exact-viewer-and-diagnostics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out draft readiness PR source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Check out immutable independently tested viewer source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          repository: zog144/station-access
+          ref: 62716629d1b7882f4c9d2ff6014bb1d697bd733f
+          path: companions/viewer-pr19
+          persist-credentials: false
+      - name: Assert immutable source selection, do not touch accepted pins
+        run: |
+          test "$(git -C companions/viewer-pr19 rev-parse HEAD)" = 62716629d1b7882f4c9d2ff6014bb1d697bd733f
+          test -f frontend/integration/workspace-viewer-readiness.test.tsx
+          test -f frontend/src/pages/WorkspaceReadinessPanel.tsx
+          git diff --exit-code -- public-companion-pins.json
+      - name: Assemble source-only synthetic union without publication
+        run: |
+          for file in \
+            frontend/src/vnc/VncSessionProvider.tsx \
+            frontend/src/vnc/PersistentVncSessions.tsx \
+            frontend/src/pages/VncPage.tsx \
+            frontend/src/styles.css; do
+            test -f "companions/viewer-pr19/$file"
+            cp "companions/viewer-pr19/$file" "$file"
+          done
+          git diff --name-only -- public-companion-pins.json
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: '24.19.0'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend from reviewed lockfile
+        run: npm ci --prefix frontend
+      - name: Run synthetic viewer + diagnostics lifecycle tests
+        working-directory: frontend
+        run: npx vitest run integration/workspace-viewer-readiness.test.tsx
+      - name: Scope
+        if: always()
+        run: |
+          echo 'Source-only synthetic combination: PR #19 viewer at 62716629d1b7882f4c9d2ff6014bb1d697bd733f plus current PR #20 diagnostics.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'No native VNC/X11/RFB execution, grant issuance, authority promotion, production source repinning or automatic recovery.' >> "$GITHUB_STEP_SUMMARY"
