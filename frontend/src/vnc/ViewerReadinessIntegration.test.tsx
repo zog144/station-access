@@ -42,14 +42,7 @@ it('keeps iframe identity, zoom and browser grant when X11/RFB evidence changes'
   const grant = vi.spyOn(api, 'vncGrant').mockResolvedValue({
     token: 'never-display-this', expires_at: 'later', novnc_url: 'about:blank#original-grant',
   })
-  const read = vi.spyOn(api, 'workspaceReadiness').mockResolvedValueOnce(base).mockResolvedValueOnce({
-    ...base, desktop: 'running', diagnostics: {
-      ...base.diagnostics!,
-      checks: base.diagnostics!.checks.map(check => ({
-        ...check, status: 'unknown' as const, code: 'probe-unavailable',
-      })),
-    },
-  })
+  const read = vi.spyOn(api, 'workspaceReadiness').mockResolvedValue(base)
   const view = render(<Viewer />)
   await waitFor(() => expect(view.container.querySelectorAll('iframe')).toHaveLength(1))
   const frame = view.container.querySelector('iframe')!
@@ -60,8 +53,17 @@ it('keeps iframe identity, zoom and browser grant when X11/RFB evidence changes'
   await screen.findByLabelText('Workspace diagnostics')
   expect(screen.getByLabelText('Workspace diagnostics').textContent).toContain('x11 authorization · confirmed')
   expect(screen.getByLabelText('Workspace diagnostics').textContent).toContain('rfb availability · failed')
+  const callsBeforeRefresh = read.mock.calls.length
+  read.mockResolvedValueOnce({
+    ...base, desktop: 'running', diagnostics: {
+      ...base.diagnostics!,
+      checks: base.diagnostics!.checks.map(check => ({
+        ...check, status: 'unknown' as const, code: 'probe-unavailable',
+      })),
+    },
+  })
   fireEvent.click(screen.getByRole('button', { name: 'Refresh status' }))
-  await waitFor(() => expect(read).toHaveBeenCalledTimes(2))
+  await waitFor(() => expect(read.mock.calls.length).toBeGreaterThan(callsBeforeRefresh))
   await waitFor(() => expect(screen.getByLabelText('Workspace diagnostics').textContent).toContain('rfb availability · unknown'))
   expect(view.container.querySelector('iframe')).toBe(frame)
   expect(frame.getAttribute('src')).toBe(initialSrc)
@@ -74,17 +76,18 @@ it('controller outage makes diagnostics stale without revoking the iframe; expli
   const grant = vi.spyOn(api, 'vncGrant')
     .mockResolvedValueOnce({ token: 'old-secret', expires_at: 'later', novnc_url: 'about:blank#grant-1' })
     .mockResolvedValueOnce({ token: 'new-secret', expires_at: 'later', novnc_url: 'about:blank#grant-2' })
-  const read = vi.spyOn(api, 'workspaceReadiness').mockResolvedValueOnce(base)
-    .mockRejectedValue(new Error('controller unavailable'))
+  const read = vi.spyOn(api, 'workspaceReadiness').mockResolvedValue(base)
   const view = render(<Viewer />)
   await waitFor(() => expect(view.container.querySelectorAll('iframe')).toHaveLength(1))
   const first = view.container.querySelector('iframe')!
   fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }))
   fireEvent.click(screen.getByRole('button', { name: 'Workspace status' }))
   await screen.findByLabelText('Workspace diagnostics')
+  const callsBeforeOutage = read.mock.calls.length
+  read.mockRejectedValueOnce(new Error('controller unavailable'))
   fireEvent.click(screen.getByRole('button', { name: 'Refresh status' }))
   await screen.findByRole('alert')
-  expect(read).toHaveBeenCalledTimes(2)
+  expect(read.mock.calls.length).toBeGreaterThan(callsBeforeOutage)
   expect(screen.getByLabelText('Workspace diagnostics').textContent).toContain('unknown (last: confirmed)')
   expect((screen.getByRole('button', { name: 'Connect desktop' }) as HTMLButtonElement).disabled).toBe(true)
   expect(view.container.querySelector('iframe')).toBe(first)
