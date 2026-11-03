@@ -151,6 +151,20 @@ def inspect(workspace, gateway, user):
                         and later.application_name == workspace.application_name
                         and later.state == "running" and not later.terminal):
                     stage_evidence = candidate
+                else:
+                    # A replacement runtime, rotated station endpoint/grant
+                    # revision or vanished controller also invalidates the
+                    # *earlier aggregate* success. Otherwise the browser-grant
+                    # projection could retain a stale "confirmed" DB grant
+                    # after the later current-authority check failed.
+                    runtime_identity_ok = None
+                    desktop_access = None
+                    result["desktop"] = "not-verified"
             except Exception:
-                pass
+                # A failed post-probe readback is not merely absent X11/RFB
+                # evidence. Earlier desktop/grant observations cannot be
+                # considered current when the selected authority was lost.
+                runtime_identity_ok = None
+                desktop_access = None
+                result["desktop"] = "not-verified"
     return finished()
