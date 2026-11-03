@@ -1,0 +1,34 @@
+name: Workspace viewer and readiness interaction — source only
+on:
+  push:
+    branches: [review/workspace-viewer-readiness-integration-20261103]
+  pull_request:
+    paths:
+      - 'frontend/src/vnc/**'
+      - 'frontend/src/pages/WorkspaceReadinessPanel*'
+      - 'frontend/src/api.ts'
+      - '.github/workflows/workspace-viewer-readiness-interaction.yml'
+permissions:
+  contents: read
+jobs:
+  integrated-frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: '24.19.0'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --prefix frontend
+      - name: Run viewer/readiness and grant isolation tests without VNC
+        working-directory: frontend
+        run: |
+          npx vitest run src/vnc/ViewerReadinessIntegration.test.tsx src/vnc/PersistentVncSessions.test.tsx src/pages/WorkspaceReadinessPanel.test.tsx
+          npx tsc --noEmit --project tsconfig.json
+      - name: No live grant or recovery acceptance
+        if: always()
+        run: echo 'Synthetic in-memory readiness and browser grant; no live X11, RFB, VNC, Host or privileged authority.' >> "$GITHUB_STEP_SUMMARY"
