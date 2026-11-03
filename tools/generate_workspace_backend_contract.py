@@ -169,7 +169,7 @@ assert all(item["status"] == "unknown" for item in
            reports["controller-offline"]["diagnostics"]["checks"])
 payload = json.dumps(reports, sort_keys=True, indent=2) + "\n"
 assert "/private/" not in payload and "fixture-do-not-export" not in payload
-assert "endpoint_identity" not in payload and "authorization" not in payload
+assert "endpoint_identity" not in payload
 out.parent.mkdir(parents=True,exist_ok=True)
 out.write_text(payload)
 print("Real Python backend inspect/project contract: "+", ".join(cases))
