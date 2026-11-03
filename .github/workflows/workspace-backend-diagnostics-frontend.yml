@@ -1,0 +1,56 @@
+name: Exact backend diagnostic response to Workspace browser contract
+on:
+  push:
+    branches: [review/workspace-viewer-readiness-integration-20261103]
+  pull_request:
+    paths:
+      - 'frontend/integration/**'
+      - 'frontend/src/vnc/**'
+      - 'tools/generate_workspace_backend_contract.py'
+      - '.github/workflows/workspace-backend-diagnostics-frontend.yml'
+permissions:
+  contents: read
+jobs:
+  backend-to-frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Exact PR21 source, not pull-request synthetic merge
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Independently review exact PR20 Python source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          repository: zog144/station-access
+          ref: c904108da7ac9fce4d7041d2781ef2f901a81b9c
+          path: companions/readiness-pr20
+          persist-credentials: false
+      - name: Verify source closure and accepted production pins are untouched
+        run: |
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+          test "$(git -C companions/readiness-pr20 rev-parse HEAD)" = "c904108da7ac9fce4d7041d2781ef2f901a81b9c"
+          git diff --exit-code -- public-companion-pins.json
+      - name: Execute PR20's real Python inspect and five-stage diagnostic projection
+        run: |
+          python tools/generate_workspace_backend_contract.py \
+            companions/readiness-pr20/src/zog/station_access/services \
+            frontend/integration/backend-contract.generated.json
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: '24.19.0'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --prefix frontend
+      - name: Consume actual Python backend response through frontend API
+        working-directory: frontend
+        run: |
+          npx vitest run integration/ViewerBackendContract.test.tsx
+          npx vitest run src/vnc/ViewerReadinessIntegration.test.tsx
+          npx tsc --noEmit --project tsconfig.json
+      - name: Source-only scope
+        if: always()
+        run: |
+          echo 'Exact PR20 Python inspect/project source generates inert backend response bodies.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'No Django server, real grants, Host STATE, controller, X11 or RFB run.' >> "$GITHUB_STEP_SUMMARY"

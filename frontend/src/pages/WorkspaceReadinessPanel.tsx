@@ -52,6 +52,15 @@ export function WorkspaceReadinessPanel({ workspaceId, onConnect, onApplications
     {data && <>
       <p>Observed: {new Date(data.observed_at).toLocaleString()}{stale ? ' · Out of date' : ''}</p>
       <dl><dt>Controller</dt><dd>{data.controller}</dd><dt>Desktop</dt><dd>{data.desktop.replaceAll('-', ' ')}</dd></dl>
+      {data.diagnostics && <section aria-label="Workspace diagnostics">
+        <h3>Desktop access checks</h3>
+        <p>Read-only evidence, not an authorization to launch or recover. Individual X11 and RFB checks are unknown until independently observed. A valid grant does not prove a browser connection.</p>
+        <ul className="readiness-checks">{data.diagnostics.checks.map(check => <li key={check.condition}>
+          <strong>{check.condition.replaceAll('-', ' ')}</strong> · {stale ? `unknown (last: ${check.status})` : check.status}
+          <p>{stale ? 'Previous observation only; refresh for current evidence. ' : ''}{check.explanation}</p>
+          <small>Evidence: {stale ? 'stale' : check.source.replaceAll('-', ' ')} · {check.code}</small>
+        </li>)}</ul>
+      </section>}
       {data.desktop === 'running' && <p>The desktop process is running; display access has not been verified.</p>}
       {data.desktop === 'ready' && <p>Controller display probes passed. Browser connectivity is verified only by connecting the viewer.</p>}
       {data.registration === 'legacy-recovery-required' && <p role="alert">Older desktop launch evidence requires administrator recovery. It will not be cleared automatically.</p>}
