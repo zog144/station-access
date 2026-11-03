@@ -29,9 +29,10 @@ export function releasePlugin(){
   generateBundle(_options,bundle){
    const evidence=JSON.parse(fs.readFileSync(path.join(root,'license-evidence.json'),'utf8'))
    const lock=JSON.parse(fs.readFileSync(path.join(root,'package-lock.json'),'utf8'))
-   const packages=new Map(),helpers=new Set(),modules=[]
+   const packages=new Map(),helpers=new Set(),modules=[],chunkDependencies={}
    function include(directory){
     if(!packages.has(directory))packages.set(directory,reviewPackage(root,directory,evidence,lock))
+    return packages.get(directory)
    }
    for(const [name,item] of Object.entries(bundle)){
     if(item.type==='asset'){
@@ -39,10 +40,11 @@ export function releasePlugin(){
      if(name.endsWith('.css')&&/(?:url\s*\(|@import)/i.test(String(item.source)))throw new Error('Frontend license review: emitted CSS contains an unreviewed resource URL/import.')
      continue
     }
+    const chunkPackages=new Set()
     for(const id of Object.keys(item.modules)){
      if(id.startsWith('\0vite/')){
       if(!['\0vite/modulepreload-polyfill.js','\0vite/preload-helper.js'].includes(id))throw new Error('Frontend license review: unknown generated helper '+id)
-      helpers.add(id.slice(1));include(path.join(root,'node_modules/vite'));continue
+      helpers.add(id.slice(1));const dep=include(path.join(root,'node_modules/vite'));chunkPackages.add(dep.name+'@'+dep.version);continue
      }
      const clean=id.replace(/^\0/,'').split('?')[0]
      if(clean.includes('/node_modules/')){
@@ -51,7 +53,7 @@ export function releasePlugin(){
       let directory=path.dirname(clean),found=false
       while(directory.includes('node_modules')){
        const file=path.join(directory,'package.json')
-       if(fs.existsSync(file)&&JSON.parse(fs.readFileSync(file,'utf8')).name){include(directory);found=true;break}
+       if(fs.existsSync(file)&&JSON.parse(fs.readFileSync(file,'utf8')).name){const dep=include(directory);chunkPackages.add(dep.name+'@'+dep.version);found=true;break}
        directory=path.dirname(directory)
       }
       if(!found)throw new Error('Frontend license review: cannot identify '+id)
@@ -60,6 +62,7 @@ export function releasePlugin(){
      }
      modules.push(path.relative(root,clean).split(path.sep).join('/')+(id.startsWith('\0')?'?'+id.split('?')[1]:''))
     }
+    chunkDependencies[name]=[...chunkPackages].sort()
    }
    // Vite's published notice contains the complete licenses for its bundled helper tooling.
    include(path.join(root,'node_modules/vite'))
@@ -79,7 +82,7 @@ export function releasePlugin(){
    for(const name of ['src','scripts','license-evidence.json','toolchain.json','package.json','package-lock.json','vite.config.ts','tsconfig.json','index.html','../LICENSE','../LICENSES/BSD-3-Clause.txt','../LICENSES/GPL-3.0-only.txt'])record(name)
    const outputs={};for(const [name,item] of Object.entries(bundle))outputs[name]=hash(item.type==='chunk'?item.code:item.source)
    outputs[licenseFile]=hash(legal)
-   this.emitFile({type:'asset',fileName:'frontend-build.json',source:JSON.stringify({schema:2,mode:'production',node_env:'production',sources,outputs,licenses:licenseFile,first_party_licenses:firstParty.sources.map(({path,sha256})=>({path,sha256})),coverage:{...coverage,generated_helpers:[...helpers].sort(),modules:[...new Set(modules)].sort()},dependencies:deps.map(({notices,...dep})=>({...dep,notices:notices.map(({text,...notice})=>notice)}))},null,2)+'\n'})
+   this.emitFile({type:'asset',fileName:'frontend-build.json',source:JSON.stringify({schema:2,mode:'production',node_env:'production',sources,outputs,licenses:licenseFile,first_party_licenses:firstParty.sources.map(({path,sha256})=>({path,sha256})),coverage:{...coverage,generated_helpers:[...helpers].sort(),modules:[...new Set(modules)].sort(),chunk_dependencies:chunkDependencies},dependencies:deps.map(({notices,...dep})=>({...dep,notices:notices.map(({text,...notice})=>notice)}))},null,2)+'\n'})
   }
  }
 }
