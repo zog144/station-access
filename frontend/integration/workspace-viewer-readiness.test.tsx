@@ -56,7 +56,7 @@ function App() {
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
 it('read-only changing X11/RFB and controller evidence never rotates an open iframe or grant', async () => {
-  let current = observation()
+  let current = observation({grant:'confirmed'})
   const status = vi.spyOn(api, 'workspaceReadiness').mockImplementation(async () => current)
   const authorize = vi.spyOn(api, 'vncGrant').mockResolvedValue(grant('first'))
   const launch = vi.spyOn(api, 'startWorkspace')
@@ -70,11 +70,12 @@ it('read-only changing X11/RFB and controller evidence never rotates an open ifr
   fireEvent.click(screen.getByRole('button',{name:'Workspace status'}))
   const diagnostic = await screen.findByLabelText('Workspace diagnostics')
   await waitFor(() => expect(diagnostic.textContent).toContain('rfb availability · confirmed'))
+  expect(diagnostic.textContent).toContain('browser grant · confirmed')
 
-  current = observation({rfb:'failed', desktop:'running',grant:'confirmed'})
+  current = observation({rfb:'failed', desktop:'running',grant:'unknown'})
   fireEvent.click(screen.getByRole('button',{name:'Refresh status'}))
   await waitFor(() => expect(diagnostic.textContent).toContain('rfb availability · failed'))
-  expect(diagnostic.textContent).toContain('browser grant · confirmed')
+  expect(diagnostic.textContent).toContain('browser grant · unknown')
   // A diagnostic indication of a saved grant cannot create/replace one.
   expect(authorize).toHaveBeenCalledTimes(1)
   expect(screen.getByTitle('VNC workspace one')).toBe(iframe)
@@ -106,8 +107,8 @@ it('read-only changing X11/RFB and controller evidence never rotates an open ifr
 })
 
 it('saved diagnostic browser-grant confirmation cannot reuse a closed grant on reconnect', async () => {
-  vi.spyOn(api, 'workspaceReadiness').mockResolvedValue(
-    observation({controller:'unavailable',desktop:'unknown',grant:'confirmed'}))
+  let current = observation({grant:'confirmed'})
+  vi.spyOn(api, 'workspaceReadiness').mockImplementation(async () => current)
   const authorize = vi.spyOn(api,'vncGrant')
     .mockResolvedValueOnce(grant('old'))
     .mockRejectedValueOnce(new Error('old grant refused by server'))
@@ -120,6 +121,10 @@ it('saved diagnostic browser-grant confirmation cannot reuse a closed grant on r
   fireEvent.click(screen.getByRole('button',{name:'Workspace status'}))
   const diagnostic = await screen.findByLabelText('Workspace diagnostics')
   await waitFor(() => expect(diagnostic.textContent).toContain('browser grant · confirmed'))
+  current = observation({controller:'unavailable',desktop:'unknown',grant:'unknown'})
+  fireEvent.click(screen.getByRole('button',{name:'Refresh status'}))
+  await waitFor(() => expect(screen.getByText('unavailable')).toBeTruthy())
+  expect(diagnostic.textContent).toContain('browser grant · unknown')
   expect((screen.getByRole('button',{name:'Connect desktop'}) as HTMLButtonElement).disabled).toBe(true)
   expect(authorize).toHaveBeenCalledTimes(1)
   // Explicit request is routed through vncGrant, not through diagnostic data.
