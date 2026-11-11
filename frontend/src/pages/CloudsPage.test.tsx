@@ -105,3 +105,25 @@ test('cloud account loading errors show the save blocker and recover with Refres
  expect(list).toHaveBeenCalledTimes(2)
  expect(save).not.toHaveBeenCalled()
 })
+
+
+test('failed readiness refresh cannot leave a previously ready vault status usable',async()=>{
+ const list=vi.spyOn(cloudApi,'list')
+  .mockResolvedValueOnce(result)
+  .mockRejectedValueOnce(new Error('Unable to inspect protected vault'))
+ const save=vi.spyOn(cloudApi,'save').mockResolvedValue(result)
+ render(<CloudsPage/>)
+ await screen.findByText('Development AWS')
+ fireEvent.change(screen.getByLabelText('Credential source'),{target:{value:'keys'}})
+ fireEvent.change(screen.getByLabelText('Access key ID'),{target:{value:'AKIA'+'X'.repeat(16)}})
+ fireEvent.change(screen.getByLabelText('Secret access key'),{target:{value:'retained-synthetic-value'}})
+ const submit=screen.getByRole('button',{name:'Save AWS account'}) as HTMLButtonElement
+ expect(submit.disabled).toBe(false)
+ fireEvent.click(screen.getByRole('button',{name:'Refresh accounts'}))
+ await screen.findByText('Unable to inspect protected vault')
+ expect(submit.disabled).toBe(true)
+ expect((screen.getByLabelText('Secret access key') as HTMLInputElement).value).toBe('retained-synthetic-value')
+ expect(screen.getByText(/Cloud account status could not be loaded/)).toBeTruthy()
+ expect(save).not.toHaveBeenCalled()
+ expect(list).toHaveBeenCalledTimes(2)
+})
