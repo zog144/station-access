@@ -17,7 +17,7 @@ export function CloudsPage(){
   return ()=>{active=false}
  },[user?.is_superuser])
  if(!user?.is_superuser)return <p>Administrator access required.</p>
- const vaultBlocked=mode==='keys' && data?.vault_ready===false
+ const vaultBlocked=mode==='keys' && !!data && data.vault_ready!==true
  const statusBlocked=!data || statusLoading
  const saveBlocked=busy || statusBlocked || vaultBlocked
  function clearSecrets(){setAccess('');setSecret('');setToken('');setExpiry('')}
