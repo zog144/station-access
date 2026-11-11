@@ -42,3 +42,66 @@ test('expired credentials disable checking and failed checks display errors',asy
  render(<CloudsPage/>);await screen.findByText('Development AWS')
  expect((screen.getByRole('button',{name:'Check AWS identity'}) as HTMLButtonElement).disabled).toBe(true)
 })
+
+
+test('fully entered AWS keys remain blocked only until the protected vault is ready',async()=>{
+ const list=vi.spyOn(cloudApi,'list')
+  .mockResolvedValueOnce({...result,vault_ready:false})
+  .mockResolvedValueOnce(result)
+ const save=vi.spyOn(cloudApi,'save').mockResolvedValue(result)
+ render(<CloudsPage/>)
+ await screen.findByText('Development AWS')
+ fireEvent.change(screen.getByLabelText('Label'),{target:{value:'New AWS account'}})
+ fireEvent.change(screen.getByLabelText('Expected AWS account ID'),{target:{value:'999999999999'}})
+ fireEvent.change(screen.getByLabelText('Credential source'),{target:{value:'keys'}})
+ fireEvent.change(screen.getByLabelText('Access key ID'),{target:{value:'AKIA'+'X'.repeat(16)}})
+ fireEvent.change(screen.getByLabelText('Secret access key'),{target:{value:'synthetic-only-secret'}})
+ const submit=screen.getByRole('button',{name:'Save AWS account'}) as HTMLButtonElement
+ expect(submit.disabled).toBe(true)
+ expect(screen.getByText(/Encrypted AWS key storage is not ready/)).toBeTruthy()
+ expect(screen.getByText(/not because your AWS fields are incomplete/)).toBeTruthy()
+ expect(save).not.toHaveBeenCalled()
+ fireEvent.click(screen.getByRole('button',{name:'Recheck vault readiness'}))
+ await waitFor(()=>expect(submit.disabled).toBe(false))
+ expect(list).toHaveBeenCalledTimes(2)
+ expect((screen.getByLabelText('Secret access key') as HTMLInputElement).value).toBe('synthetic-only-secret')
+ fireEvent.click(submit)
+ await waitFor(()=>expect(save).toHaveBeenCalledWith(expect.objectContaining({
+  id:undefined,revision:0,label:'New AWS account',account_id:'999999999999',
+  mode:'keys',region:'us-east-1',enabled:true,
+  secrets:{access_key_id:'AKIA'+'X'.repeat(16),secret_access_key:'synthetic-only-secret'},
+ })))
+})
+
+test('default credential-chain AWS accounts do not need an encryption vault',async()=>{
+ vi.spyOn(cloudApi,'list').mockResolvedValue({...result,vault_ready:false})
+ const save=vi.spyOn(cloudApi,'save').mockResolvedValue(result)
+ render(<CloudsPage/>)
+ await screen.findByText('Development AWS')
+ fireEvent.change(screen.getByLabelText('Label'),{target:{value:'Instance role'}})
+ fireEvent.change(screen.getByLabelText('Expected AWS account ID'),{target:{value:'123456789012'}})
+ const submit=screen.getByRole('button',{name:'Save AWS account'}) as HTMLButtonElement
+ expect(submit.disabled).toBe(false)
+ expect(screen.queryByText(/Encrypted AWS key storage is not ready/)).toBeNull()
+ fireEvent.click(submit)
+ await waitFor(()=>expect(save).toHaveBeenCalledWith(expect.objectContaining({
+  mode:'default',secrets:undefined,label:'Instance role',
+ })))
+})
+
+test('cloud account loading errors show the save blocker and recover with Refresh accounts',async()=>{
+ const list=vi.spyOn(cloudApi,'list')
+  .mockRejectedValueOnce(new Error('Service unavailable'))
+  .mockResolvedValueOnce(result)
+ const save=vi.spyOn(cloudApi,'save').mockResolvedValue(result)
+ render(<CloudsPage/>)
+ await screen.findByRole('alert')
+ expect(screen.getByText('Service unavailable')).toBeTruthy()
+ const submit=screen.getByRole('button',{name:'Save AWS account'}) as HTMLButtonElement
+ expect(submit.disabled).toBe(true)
+ expect(screen.getByText(/Cloud account status could not be loaded/)).toBeTruthy()
+ fireEvent.click(screen.getByRole('button',{name:'Refresh accounts'}))
+ await waitFor(()=>expect(submit.disabled).toBe(false))
+ expect(list).toHaveBeenCalledTimes(2)
+ expect(save).not.toHaveBeenCalled()
+})
