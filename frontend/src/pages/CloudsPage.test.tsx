@@ -127,3 +127,17 @@ test('failed readiness refresh cannot leave a previously ready vault status usab
  expect(save).not.toHaveBeenCalled()
  expect(list).toHaveBeenCalledTimes(2)
 })
+
+
+test('missing vault readiness flag cannot enable encrypted AWS key saves',async()=>{
+ const missing={accounts:result.accounts} as typeof result
+ vi.spyOn(cloudApi,'list').mockResolvedValue(missing)
+ const save=vi.spyOn(cloudApi,'save')
+ render(<CloudsPage/>)
+ await screen.findByText('Development AWS')
+ fireEvent.change(screen.getByLabelText('Credential source'),{target:{value:'keys'}})
+ const submit=screen.getByRole('button',{name:'Save AWS account'}) as HTMLButtonElement
+ expect(submit.disabled).toBe(true)
+ expect(screen.getByText(/Encrypted AWS key storage is not ready/)).toBeTruthy()
+ expect(save).not.toHaveBeenCalled()
+})
