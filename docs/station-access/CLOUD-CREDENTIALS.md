@@ -72,3 +72,48 @@ https://docs.aws.amazon.com/boto3/latest/reference/services/sts/client/get_calle
 Concurrent work preserved: this pass was reapplied without overlapping edits onto
 6e8e9ff5af799d90cbe8d183d5c64cc65a199207, including host-discover 0.3.4
 cancellation compatibility and persistent archive-mirror live acceptance evidence.
+
+
+## When "Save AWS account" is disabled
+
+The button is **not** enabled simply because all the AWS fields have values.
+The page requires the admin-only `GET /api/setup/clouds/` response before
+enabling either mode. A failure to load that response blocks saving and
+shows a retry instruction. If **Encrypted saved access keys** is selected,
+the same response must contain `vault_ready=true`; otherwise the page shows
+an explicit vault-readiness blocker and a **Recheck vault readiness** button.
+Rechecking rereads server readiness without clearing the AWS fields already
+entered in the form. The **Station default credentials / instance role**
+mode requires no saved-key vault and remains usable even when `vault_ready`
+is false.
+
+The server computes `vault_ready` by reading and validating its own
+`HOST_VAULT_CONFIGURATION` keyring. This can be false when the setting is
+missing or points to a missing, incorrectly permissioned, unreadable, or
+invalid keyring. The browser cannot fix it by adding more AWS fields, and it
+must never generate a new encryption master key or receive the vault contents.
+
+For a **genuinely new** station vault, a separately authorized operator
+should verify the service environment's exact persistent
+`HOST_VAULT_CONFIGURATION` file path and the parent directory's protected
+owner and permissions. The installed source provides the native-only
+Django management command `create_station_vault`, which generates a
+random AES-GCM keyring with exclusive no-overwrite creation and mode 0600;
+the operator may invoke `python manage.py create_station_vault <approved-path>`
+in the reviewed installed environment under an authorized local identity.
+Do **not** execute the command against an existing, missing-after-restart,
+or previously used vault: restore the original protected keyring from its
+coordinated backup instead, otherwise saved secrets become undecryptable.
+Verify that the actual station service can read the exact original keyring
+and restart/reload its configuration only through the authorized
+installation procedure. Then select **Recheck vault readiness** on the
+page. Never paste vault contents, AWS secrets, or access keys into support
+logs, GitHub issues, or this diagnostic process.
+
+A remaining backend refusal after readiness becomes green should be
+reported with its sanitized HTTP status and nonsecret message. The server
+still validates the 12-digit account ID, supported commercial region,
+complete key pair, optional session token and future timezone-qualified
+expiry, and independent administrator/CSRF permissions; readiness is not
+an authorization bypass. This source fix changes only user feedback and
+retry behavior, not the server-side encryption or credential policy.
