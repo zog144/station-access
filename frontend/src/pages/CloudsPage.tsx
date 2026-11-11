@@ -40,13 +40,13 @@ export function CloudsPage(){
  <p>{row.check.message}</p>{row.check.finished_at&&<p>Last check: {new Date(row.check.finished_at).toLocaleString()}{!row.check.fresh?' · Not a current verification':''}</p>}
  <button disabled={busy} onClick={()=>edit(row)}>Edit account</button><button disabled={busy||!row.enabled||row.expired} onClick={()=>check(row)}>Check AWS identity</button></article>)}</div>
  <form className="setup-pane" onSubmit={save}><h2>{selected?'Edit AWS account':'Add AWS account'}</h2>
- {statusBlocked&&<p role="status" id="cloud-save-blocker">{statusLoading?'Loading cloud account availability…':'Cloud account status could not be loaded. Select Refresh accounts to retry before saving.'}</p>}
+ {statusBlocked&&<p role="status" id="cloud-account-status-blocker">{statusLoading?'Loading cloud account availability…':'Cloud account status could not be loaded. Select Refresh accounts to retry before saving.'}</p>}
  <label>Label<input required maxLength={100} value={label} onChange={e=>setLabel(e.target.value)}/></label>
  <label>Expected AWS account ID<input required pattern="[0-9]{12}" disabled={!!selected} value={account} onChange={e=>setAccount(e.target.value)}/></label>
  <label>AWS region<input required maxLength={40} value={region} onChange={e=>setRegion(e.target.value)}/></label>
  <label>Credential source<select disabled={!!selected} value={mode} onChange={e=>{setMode(e.target.value as typeof mode);clearSecrets()}}><option value="default">Station default credentials / instance role</option><option value="keys">Encrypted saved access keys</option></select></label>
  {mode==='default'?<p>The SDK uses credentials available to the station service, which may come from its environment, profile or instance role. This does not attach a role to a host.</p>:<>
- {vaultBlocked&&<div role="status" id="cloud-save-blocker">
+ {vaultBlocked&&<div role="status" id="cloud-vault-blocker">
   <p><strong>Encrypted AWS key storage is not ready on this station.</strong> Save is disabled because the protected station credential vault could not be verified, not because your AWS fields are incomplete.</p>
   <p>An administrator of the station service must configure its protected vault keyring outside the browser (HOST_VAULT_CONFIGURATION). Existing entries must retain their original keyring; do not generate a replacement for an existing vault. Then recheck status here. You can save a default-credential-chain account without the vault.</p>
   <button type="button" disabled={busy||statusLoading} onClick={refresh}>Recheck vault readiness</button>
@@ -57,7 +57,7 @@ export function CloudsPage(){
  {token&&<label>Session expiry (UTC ISO timestamp)<input required placeholder="2026-10-01T12:00:00Z" value={expiry} onChange={e=>setExpiry(e.target.value)}/></label>}
  {selected&&<p>Leave all credential fields blank to keep the saved keys and expiry. Replacement requires the complete key set.</p>}</>}
  <label><input type="checkbox" checked={enabled} onChange={e=>setEnabled(e.target.checked)}/> Enable for future explicit use</label>
- <button disabled={saveBlocked} aria-describedby={statusBlocked||vaultBlocked?'cloud-save-blocker':undefined}>Save AWS account</button>{selected&&<button type="button" disabled={busy} onClick={()=>edit(null)}>Cancel editing</button>}</form>
+ <button disabled={saveBlocked} aria-describedby={statusBlocked?'cloud-account-status-blocker':vaultBlocked?'cloud-vault-blocker':undefined}>Save AWS account</button>{selected&&<button type="button" disabled={busy} onClick={()=>edit(null)}>Cancel editing</button>}</form>
  <p>Identity checks make a read-only AWS STS request. They do not verify provisioning permissions. Disabling an entry does not revoke keys at AWS or stop existing jobs. Credentials are never returned by this page.</p>
  <div className="setup-grid"><article className="setup-pane"><h2>Microsoft Azure</h2><p>Planned · Credential entry and host-deploy support are not available.</p></article><article className="setup-pane"><h2>Google Cloud</h2><p>Planned · Credential entry and host-deploy support are not available.</p></article></div></section>
 }
