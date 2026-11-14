@@ -2,6 +2,7 @@
 from django.utils import timezone
 from . import controller_workspaces
 from .workspace_applications import launch_actions
+from .workspace_diagnostics import project as diagnostic_project
 
 # Controller exception/message text can contain paths, parameters and secrets.
 # Only known check codes and locally authored explanations cross the browser API.
@@ -62,13 +63,28 @@ def inspect(workspace, gateway, user):
                   registration="recorded" if workspace.controller_schema else "not-recorded",
                   pending_count=None, cleanup_count=None,
                   launch_actions=launch_actions(workspace, user), preflight=None)
+    controller_available = False
+    runtime_observation = None
+    runtime_identity_ok = None
+    desktop_access = None
+    stage_evidence = None
+
+    def finished():
+        result["diagnostics"] = diagnostic_project(
+            workspace, user, controller_available=controller_available,
+            runtime=runtime_observation, runtime_identity_ok=runtime_identity_ok,
+            desktop_access=desktop_access, stage_evidence=stage_evidence,
+        )
+        return result
+
     if not workspace.controller_schema and (workspace.launch_request_id or workspace.runtime_id or workspace.launch_pending):
         result["registration"] = "legacy-recovery-required"
     try:
         gateway.require_workspace_contract()
         result["controller"] = "available"
+        controller_available = True
     except Exception:
-        return result
+        return finished()
     result["preflight"] = preflight(workspace, gateway, workspace.application_name)
     if workspace.controller_schema == controller_workspaces.SCHEMA:
         try:
@@ -80,14 +96,86 @@ def inspect(workspace, gateway, user):
     if workspace.runtime_id:
         try:
             runtime = gateway.get_current_runtime(workspace.runtime_id)
-            if not runtime or runtime.workspace_id != str(workspace.pk) or runtime.application_name != workspace.application_name:
+            runtime_observation = runtime
+            runtime_identity_ok = bool(runtime and runtime.workspace_id == str(workspace.pk)
+                                       and runtime.application_name == workspace.application_name)
+            if not runtime_identity_ok:
                 raise ValueError("Unverified desktop identity")
             result["desktop"] = runtime.state if runtime.state in ("running", "failed", "terminated", "starting", "stopping") else "not-verified"
             result["cleanup_pending"] = bool(runtime.terminal and runtime.cleanup_pending)
             if runtime.state == "running":
-                controller_workspaces.access(workspace, gateway)
-                result["desktop"] = "ready"
+                try:
+                    current_socket = controller_workspaces.access(workspace, gateway)
+                    # Missing aggregate desktop access does not erase separately
+                    # attributable X11/RFB evidence for the selected runtime.
+                    desktop_access = (False if current_socket != workspace.vnc_socket
+                                      else True if workspace.endpoint_ready else None)
+                    if desktop_access is True:
+                        result["desktop"] = "ready"
+                except Exception:
+                    pass
         except Exception:
-            # A running process is distinct from a verified X11/RFB endpoint.
+            # The stored running intent is not a live runtime observation.
             pass
-    return result
+
+    # Independent stage source proof is inspected separately from aggregate
+    # desktop access, which may fail precisely because RFB is unavailable.
+    # Never use the combined desktop-ready flag to synthesize either stage.
+    if (workspace.controller_schema == controller_workspaces.SCHEMA
+            and workspace.desired_running and workspace.runtime_id
+            and runtime_observation is not None and runtime_identity_ok is True
+            and runtime_observation.state == "running"
+            and not runtime_observation.terminal):
+        stage_reader = getattr(gateway, "workspace_desktop_readiness", None)
+        if callable(stage_reader):
+            # The optional independent stage reader may be absent or refuse
+            # unsupported controller versions. Its failure alone says
+            # nothing new about an earlier verified aggregate desktop probe.
+            # Still reselect runtime/endpoint to detect a real authority race.
+            try:
+                candidate = stage_reader(str(workspace.pk))
+            except Exception:
+                candidate = None
+            try:
+                later = gateway.get_current_runtime(workspace.runtime_id)
+                # Check local immutable intent and grant revision again:
+                # station may have changed during the controller's probes.
+                fields = ("runtime_id", "endpoint_revision", "vnc_socket",
+                          "controller_schema", "desired_running", "endpoint_ready")
+                current = type(workspace).objects.filter(pk=workspace.pk).values(*fields).first()
+                # Only recheck aggregate access if it had been independently
+                # confirmed before probing. Otherwise the stage inspection
+                # remains useful for diagnosing an inaccessible desktop.
+                still_accessible = (desktop_access is not True
+                                    or controller_workspaces.access(workspace, gateway) == workspace.vnc_socket)
+                if (current is not None
+                        and all(current[field] == getattr(workspace, field)
+                                for field in fields)
+                        and still_accessible
+                        and later is not None
+                        and later.runtime_id == runtime_observation.runtime_id
+                        and later.workspace_id == str(workspace.pk)
+                        and later.application_name == workspace.application_name
+                        and later.state == "running" and not later.terminal):
+                    stage_evidence = candidate
+                else:
+                    # A replacement runtime, rotated station endpoint/grant
+                    # revision or vanished controller also invalidates the
+                    # *earlier aggregate* success. Otherwise the browser-grant
+                    # projection could retain a stale "confirmed" DB grant
+                    # after the later current-authority check failed.
+                    runtime_observation = None
+                    runtime_identity_ok = None
+                    desktop_access = None
+                    result["desktop"] = "not-verified"
+                    result["cleanup_pending"] = None
+            except Exception:
+                # A failed post-probe readback is not merely absent X11/RFB
+                # evidence. Earlier desktop/grant observations cannot be
+                # considered current when the selected authority was lost.
+                runtime_observation = None
+                runtime_identity_ok = None
+                desktop_access = None
+                result["desktop"] = "not-verified"
+                result["cleanup_pending"] = None
+    return finished()

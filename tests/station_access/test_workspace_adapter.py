@@ -1,5 +1,6 @@
 """Station services against the real workspace-v1 facade with simulated systemd/image IO."""
 from pathlib import Path
+from dataclasses import replace
 from tempfile import TemporaryDirectory
 from uuid import uuid4
 from unittest.mock import patch
@@ -204,6 +205,8 @@ class WorkspaceAdapterTests(TestCase):
         assert response.status_code == 200 and response['Cache-Control'] == 'no-store'
         data = response.json()
         assert data['controller'] == 'available' and data['desktop'] == 'not-verified'
+        assert data['diagnostics']['read_only'] is True
+        assert all(c['status'] == 'unknown' for c in data['diagnostics']['checks'])
         assert any(c['code'] == 'unknown-workspace' for c in data['preflight']['checks'])
         self.workspace.refresh_from_db()
         assert self.workspace.updated_at == before and not self.workspace.controller_schema
@@ -214,12 +217,126 @@ class WorkspaceAdapterTests(TestCase):
         self.ready()
         response = self.client.get(self.status_url())
         assert response.json()['desktop'] == 'ready'
+        checks = {c['condition']: c for c in response.json()['diagnostics']['checks']}
+        assert checks['accepted-runtime']['status'] == 'confirmed', (checks, data['desktop'], self.workspace.runtime_id)
+        assert checks['desktop-readiness']['status'] == 'confirmed'
+        assert checks['x11-authorization']['status'] == 'unknown'
+        assert checks['rfb-availability']['status'] == 'unknown'
+        assert checks['browser-grant']['status'] == 'unknown'
         assert response.json()['cleanup_pending'] is False and response.json()['cleanup_count'] == 0
         assert '/run/' not in response.content.decode() and 'vnc_endpoint' not in response.content.decode()
         assert len(self.transport.started) == 1
         with patch.object(self.gateway, 'workspace_desktop_access', side_effect=RuntimeError('secret /private')):
             data = self.client.get(self.status_url()).json()
         assert data['desktop'] == 'running'
+        assert next(c for c in data['diagnostics']['checks'] if c['condition'] == 'desktop-readiness')['status'] == 'unknown'
+        assert 'secret' not in str(data['diagnostics'])
+
+    def test_saved_not_ready_flag_is_unknown_not_an_endpoint_mismatch(self):
+        self.ready()
+        self.workspace.endpoint_ready = False
+        self.workspace.save(update_fields=['endpoint_ready'])
+        data = self.client.get(self.status_url()).json()
+        checks = {c['condition']: c for c in data['diagnostics']['checks']}
+        assert checks['accepted-runtime']['status'] == 'confirmed'
+        assert checks['desktop-readiness']['status'] == 'unknown'
+        assert checks['desktop-readiness']['code'] == 'desktop-access-unknown'
+
+    def test_readiness_consumes_only_separate_current_controller_stage_proof(self):
+        import time
+        self.ready()
+        original_runtime = self.gateway.get_current_runtime(self.workspace.runtime_id)
+        def evidence(**updates):
+            value = dict(
+                schema="zog-workspace-stage-readiness-v1",
+                workspace_id=str(self.workspace.pk),
+                desktop_runtime_id=self.workspace.runtime_id,
+                boot_id="station-test-boot", incarnation="current-incarnation",
+                endpoint_identity="a" * 64, observed_at=time.time(),
+                x11=dict(status="confirmed", code="ok"),
+                rfb=dict(status="failed", code="rfb-invalid"), advisory=True,
+            )
+            value.update(updates)
+            return value
+        with patch.object(self.gateway, "workspace_desktop_readiness", return_value=evidence()) as reader:
+            response = self.client.get(self.status_url())
+        assert response.status_code == 200
+        rows = {row["condition"]: row for row in response.json()["diagnostics"]["checks"]}
+        assert rows["accepted-runtime"]["status"] == "confirmed", rows
+        assert rows["desktop-readiness"]["status"] == "confirmed"
+        assert rows["x11-authorization"]["status"] == "confirmed"
+        assert rows["rfb-availability"]["status"] == "failed"
+        assert rows["rfb-availability"]["code"] == "rfb-invalid"
+        assert "endpoint_identity" not in response.content.decode()
+        assert "/run/" not in response.content.decode()
+        assert reader.call_count == 1
+
+        # The aggregate desktop access probe may fail due to the RFB
+        # endpoint, while independently selected X11 succeeds. Preserve the
+        # stage distinction without confirming browser access or a grant.
+        with patch.object(self.gateway, "workspace_desktop_readiness", return_value=evidence()):
+            with patch("zog.station_access.services.workspace_readiness.controller_workspaces.access",
+                       side_effect=RuntimeError("private RFB path")):
+                data = self.client.get(self.status_url()).json()
+        rows = {row["condition"]: row for row in data["diagnostics"]["checks"]}
+        assert data["desktop"] == "running"
+        assert rows["desktop-readiness"]["status"] == "unknown"
+        assert rows["x11-authorization"]["status"] == "confirmed"
+        assert rows["rfb-availability"]["status"] == "failed"
+        assert rows["browser-grant"]["status"] == "unknown"
+        assert "private RFB path" not in str(data)
+
+        # No saved/current controller evidence may substitute for current proof.
+        for invalid in [
+            evidence(observed_at=time.time() - 60),  # stale boot-era proof
+            evidence(endpoint_identity=None),  # root rejected changed auth
+            evidence(desktop_runtime_id="old-desktop"),  # replacement
+            evidence(x11=dict(status="confirmed", code="private-cookie")),
+        ]:
+            with self.subTest(invalid=invalid), patch.object(
+                    self.gateway, "workspace_desktop_readiness", return_value=invalid):
+                rows = {row["condition"]: row for row in self.client.get(self.status_url()).json()["diagnostics"]["checks"]}
+            assert rows["x11-authorization"]["status"] == "unknown"
+            assert rows["rfb-availability"]["status"] == "unknown"
+
+        # Exercise the *actual saved grant* record as well: post-probe
+        # controller replacement must invalidate earlier aggregate desktop
+        # success, not only X11/RFB observations.
+        issue_vnc_grant(self.user, self.workspace, self.gateway)
+        with patch.object(self.gateway, "workspace_desktop_readiness", return_value=evidence()):
+            baseline = self.client.get(self.status_url()).json()
+        baseline_rows = {item["condition"]: item for item in baseline["diagnostics"]["checks"]}
+        assert baseline_rows["desktop-readiness"]["status"] == "confirmed"
+        assert baseline_rows["browser-grant"]["status"] == "confirmed"
+
+        # Race: selected runtime ends between initial access and second
+        # inspection. All aggregate and saved-grant observations must become
+        # unknown without a new launch or grant.
+        with patch.object(self.gateway, "workspace_desktop_readiness", return_value=evidence()):
+            with patch.object(self.gateway, "get_current_runtime",
+                              side_effect=[original_runtime,
+                                           replace(original_runtime, state="terminated")]):
+                data = self.client.get(self.status_url()).json()
+        rows = {row["condition"]: row for row in data["diagnostics"]["checks"]}
+        assert data["desktop"] == "not-verified"
+        for condition in ("accepted-runtime", "desktop-readiness",
+                          "x11-authorization", "rfb-availability", "browser-grant"):
+            assert rows[condition]["status"] == "unknown", rows
+
+        # Station's own endpoint revision can rotate while root/controller
+        # performs its read-only probe. The returned old proof is not live.
+        def rotate_station_revision(_workspace_id):
+            type(self.workspace).objects.filter(pk=self.workspace.pk).update(
+                endpoint_revision=self.workspace.endpoint_revision + 1)
+            return evidence()
+        with patch.object(self.gateway, "workspace_desktop_readiness",
+                          side_effect=rotate_station_revision):
+            data = self.client.get(self.status_url()).json()
+        rows = {row["condition"]: row for row in data["diagnostics"]["checks"]}
+        assert data["desktop"] == "not-verified"
+        for condition in ("accepted-runtime", "desktop-readiness",
+                          "x11-authorization", "rfb-availability", "browser-grant"):
+            assert rows[condition]["status"] == "unknown", rows
 
     def test_readiness_preserves_pending_evidence_when_controller_unavailable(self):
         action = WorkspaceApplicationLaunch.objects.create(workspace=self.workspace, application_name='terminal', request_id='private-request', state='uncertain')
@@ -228,6 +345,7 @@ class WorkspaceAdapterTests(TestCase):
             response = self.client.get(self.status_url())
         data = response.json()
         assert data['controller'] == 'unavailable' and data['pending_count'] is None
+        assert all(c['status'] == 'unknown' for c in data['diagnostics']['checks'])
         assert data['registration'] == 'legacy-recovery-required' and data['launch_pending']
         assert data['launch_actions'][0]['id'] == str(action.pk)
         assert 'private' not in response.content.decode() and 'old-desktop' not in response.content.decode()
