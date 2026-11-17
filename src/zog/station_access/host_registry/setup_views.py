@@ -6,6 +6,45 @@ from .models import ProviderCredential, DnsProviderSelection
 from . import setup_configuration as setup
 
 
+def dns_controller_status():
+    """Return a safe local-only DNS-controller state for setup guidance."""
+    from pathlib import Path
+    from django.conf import settings
+    from .dns_reconcile import configuration, controller_lock
+    from .dns_cutover import controller_state
+
+    expected = Path(settings.STATE_DIRECTORY) / 'dns-controller' / 'configuration.json'
+    configured = getattr(settings, 'HOST_DNS_CONFIGURATION', '')
+    if not configured or Path(configured) != expected:
+        return 'deployment_setup_required'
+    if not Path(settings.STATE_DIRECTORY).is_dir():
+        return 'deployment_setup_required'
+    state_root = expected.parent
+    if not state_root.exists():
+        return 'uninitialized'
+    if not expected.exists():
+        try:
+            if not any(state_root.iterdir()):
+                return 'uninitialized'
+            from .dns_empty_bootstrap import _allowed_files, _guard
+            with _guard() as (root, _):
+                _allowed_files(root)
+            return 'bootstrap_pending'
+        except OSError:
+            return 'needs_attention'
+        except Exception:
+            return 'needs_attention'
+    try:
+        config = configuration()
+        with controller_lock(config, modes=('legacy', 'frozen', 'shared', 'paused')):
+            state = controller_state(config)
+        return state.get('writer', 'legacy')
+    except BlockingIOError:
+        return 'busy'
+    except Exception:
+        return 'needs_attention'
+
+
 def error_response(error):
     if isinstance(error,setup.Conflict):return response({'detail':str(error)},409)
     if isinstance(error,(ValueError,RequestDataTooBig)):return response({'detail':str(error) if isinstance(error,ValueError) else 'Request too large'},400)
@@ -25,7 +64,9 @@ def registries(request):
         try:setup.vault.keyring();ready=True
         except Exception:ready=False
         return response({'registries':[setup.provider_metadata(r) for r in ProviderCredential.objects.order_by('label')],
-                         'vault_ready':ready,'dns_selection':{'credential_id':str(selection.credential_id) if selection and selection.credential_id else '', 'revision':selection.revision if selection else 0}})
+                         'vault_ready':ready,
+                         'dns_selection':{'credential_id':str(selection.credential_id) if selection and selection.credential_id else '', 'revision':selection.revision if selection else 0},
+                         'dns_controller_status':dns_controller_status()})
     except Exception as error:return error_response(error)
 
 

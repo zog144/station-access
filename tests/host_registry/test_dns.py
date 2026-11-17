@@ -41,6 +41,8 @@ class DnsTests(TestCase):
         self.config={'domain':'example.uk','suffix':'hosts.example.uk','account_id':'a'*32,'state_directory':str(self.root),'auto_publish_enrolled':True}
         (self.root/'controller.json').write_text(json.dumps({'schema':1,**{k:self.config[k] for k in ['domain','suffix','account_id']}}))
         (self.root/'network-register').mkdir()
+        from zog.station_access.host_registry.dns_controller_lock import initialize_lock
+        initialize_lock(self.root)  # explicit legacy fixture provisioning; never runtime recreation
         self.provider=Provider();self.dns=DnsRecords(self.provider,'example.uk',self.root/'network-register')
         self.host,self.token=enroll(account_id='123456789012',region='us-east-1',instance_id='i-0123456789abcdef0',label='Compiler 01')
         HostIdentity.objects.create(host=self.host,fingerprint='a'*64,public_key='test-fixture',approved_by='test',approved_at=timezone.now())

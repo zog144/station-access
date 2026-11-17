@@ -333,7 +333,7 @@ export const api = {
 }
 
 export type ProviderAccount = {id:string;label:string;provider:'cloudflare'|'porkbun';account_id:string;revision:number;configured:boolean;supported:boolean;can_check?:boolean;access_check?:ProviderAccessCheck}
-export type RegistrySetup = {registries:ProviderAccount[];vault_ready:boolean;dns_selection:{credential_id:string;revision:number}}
+export type RegistrySetup = {registries:ProviderAccount[];vault_ready:boolean;dns_selection:{credential_id:string;revision:number};dns_controller_status:'deployment_setup_required'|'uninitialized'|'bootstrap_pending'|'legacy'|'frozen'|'shared'|'paused'|'busy'|'needs_attention'}
 export type BeaconDestination = {id:string;label:string;server:string;enabled:boolean;ca_certificate:string;revision:number}
 export type DeploymentSetup = {version:number;destinations:BeaconDestination[]}
 export type CertificateProposal = {

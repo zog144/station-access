@@ -47,6 +47,8 @@ class CutoverTests(TestCase):
         (self.root/'network-register').mkdir()
         self.config=dict(domain='example.uk',suffix='hosts.example.uk',account_id='a'*32,state_directory=str(self.root),auto_publish_enrolled=True)
         save(self.root/'controller.json',cutover.legacy_binding(self.config))
+        from zog.station_access.host_registry.dns_controller_lock import initialize_lock
+        initialize_lock(self.root)  # explicit existing-controller test fixture admission
         marker='Zog network-register owner '+hashlib.sha256(json.dumps(['a'*32,'zone',self.assignment.name,self.assignment.owner_id]).encode()).hexdigest()
         record=dict(id='legacy-record',name=self.assignment.name,type='A',content='8.8.8.8',ttl=60,proxied=False,comment=marker)
         self.provider=Provider(record,'a'*32)

@@ -8,6 +8,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, Client, override_settings
 from zog.station_access.host_registry.models import ProviderCredential, BeaconDestination, SecurityAudit
 from zog.station_access.host_registry import setup_configuration as setup
+from zog.station_access.host_registry.setup_views import dns_controller_status
 
 
 class SetupTests(TestCase):
@@ -54,6 +55,16 @@ class SetupTests(TestCase):
         self.assertEqual(self.post('registries',dict(action='select-dns',credential_id='',revision=1)).status_code,200)
         with patch('zog.network_register.client.credentials',return_value=('a'*32,'file-token')):
             self.assertEqual(setup.cloudflare_credentials({'token_file':'legacy'})[1],'file-token')
+    def test_dns_controller_status_explains_fresh_and_conflicting_setup(self):
+        state=Path(self.root.name)/'fresh-state';state.mkdir(mode=0o700)
+        fixed=state/'dns-controller'/'configuration.json'
+        with override_settings(STATE_DIRECTORY=str(state),HOST_DNS_CONFIGURATION=str(fixed)):
+            self.assertEqual(dns_controller_status(),'uninitialized')
+            fixed.parent.mkdir(mode=0o700)
+            (fixed.parent/'foreign.json').write_text('{}')
+            self.assertEqual(dns_controller_status(),'needs_attention')
+        with override_settings(STATE_DIRECTORY=str(state),HOST_DNS_CONFIGURATION=''):
+            self.assertEqual(dns_controller_status(),'deployment_setup_required')
     def test_porkbun_stored_but_not_claimed_supported(self):
         response=self.post('registries',self.provider(provider='porkbun',account_id='',secrets={'api_key':'key-value','secret_key':'secret-value'}))
         self.assertEqual(response.status_code,200);self.assertFalse(response.json()['registries'][0]['supported'])

@@ -7,7 +7,7 @@ const session=vi.hoisted(()=>({user:{is_superuser:true}}))
 vi.mock('../auth/AuthProvider',()=>({useAuth:()=>session}))
 afterEach(()=>{cleanup();vi.restoreAllMocks();session.user.is_superuser=true})
 beforeEach(()=>{vi.spyOn(api,"dnsDestinations").mockResolvedValue({destinations:[]});vi.spyOn(deploymentApi,'list').mockResolvedValue({enabled:false,hosts:[],jobs:[]})})
-const registry={registries:[],vault_ready:true,dns_selection:{credential_id:'',revision:0}}
+const registry={registries:[],vault_ready:true,dns_selection:{credential_id:'',revision:0},dns_controller_status:'uninitialized' as const}
 test('provider passwords are masked and erased after saving; Porkbun limitation explicit',async()=>{
  vi.spyOn(setupApi,'registries').mockResolvedValue(registry)
  const save=vi.spyOn(setupApi,'saveRegistry').mockResolvedValue(registry)
@@ -23,6 +23,15 @@ test('provider passwords are masked and erased after saving; Porkbun limitation 
 })
 test('no administrative setup fetch for ordinary users',()=>{
  session.user.is_superuser=false;const get=vi.spyOn(setupApi,'registries');render(<RegistriesPage/>);expect(screen.getByText('Administrator access required.')).toBeTruthy();expect(get).not.toHaveBeenCalled()
+})
+test('fresh DNS setup explains bootstrap order and disables premature credential selection',async()=>{
+ const account={id:'cloudflare',label:'Cloudflare account',provider:'cloudflare' as const,account_id:'a'.repeat(32),revision:2,configured:true,supported:true}
+ vi.spyOn(setupApi,'registries').mockResolvedValue({...registry,registries:[account]})
+ render(<RegistriesPage/>);await screen.findByText(/The shared controller has not been initialized/)
+ expect(screen.getByText(/Save the Cloudflare account below first/)).toBeTruthy()
+ expect(screen.getByText(/Then select the matching Cloudflare account here, add DNS destinations, and assign host membership from the Hosts page/)).toBeTruthy()
+ expect((screen.getByRole('button',{name:'Use for DNS reconciliation'}) as HTMLButtonElement).disabled).toBe(true)
+ expect(screen.queryByRole('group',{name:'Add a DNS destination'})).toBeNull()
 })
 test('destination save carries revision and clearly separates save from installation',async()=>{
  const row={id:'id',label:'Central',server:'https://registry.test',enabled:true,ca_certificate:'',revision:3}

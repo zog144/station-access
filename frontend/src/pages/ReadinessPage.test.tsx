@@ -35,7 +35,7 @@ test('ordinary users cannot load readiness',()=>{
 const checked:ProviderAccessCheck={status:'passed',message:'Domain listing succeeded. This does not verify DNS-write permission.',fresh:false,domains:[{id:'zone',name:'example.test',status:'active'}],more_available:true,started_at:'2026-09-27T18:00:00Z',finished_at:'2026-09-27T18:00:01Z',retry_after_seconds:0}
 const account:ProviderAccount={id:'credential',label:'Cloudflare account',provider:'cloudflare',account_id:'a'.repeat(32),revision:4,configured:true,supported:true}
 test('Cloudflare access check is explicit and shows partial stale evidence honestly',async()=>{
- const response={registries:[account],vault_ready:true,dns_selection:{credential_id:'',revision:0}}
+ const response={registries:[account],vault_ready:true,dns_selection:{credential_id:'',revision:0},dns_controller_status:'uninitialized' as const}
  vi.spyOn(setupApi,'registries').mockResolvedValueOnce(response).mockResolvedValueOnce({...response,registries:[{...account,access_check:checked}]})
  const check=vi.spyOn(setupApi,'checkProvider').mockResolvedValue({access_check:checked})
  render(<RegistriesPage/>);await screen.findByText('Cloudflare account');expect(check).not.toHaveBeenCalled()
@@ -46,7 +46,7 @@ test('Cloudflare access check is explicit and shows partial stale evidence hones
  expect(screen.getByText(checked.message)).toBeTruthy()
 })
 test('check throttling is presented to the operator',async()=>{
- vi.spyOn(setupApi,'registries').mockResolvedValue({registries:[account],vault_ready:true,dns_selection:{credential_id:'',revision:0}})
+ vi.spyOn(setupApi,'registries').mockResolvedValue({registries:[account],vault_ready:true,dns_selection:{credential_id:'',revision:0},dns_controller_status:'uninitialized'})
  vi.spyOn(setupApi,'checkProvider').mockRejectedValue(new Error('Wait one minute between checks for this account'))
  render(<RegistriesPage/>);await screen.findByText('Cloudflare account');fireEvent.click(screen.getByRole('button',{name:'Check access and list domains'}))
  expect((await screen.findByRole('alert')).textContent).toContain('Wait one minute')
