@@ -82,7 +82,7 @@ def select_dns(actor,data):
             credential=ProviderCredential.objects.get(pk=data['credential_id'])
             if credential.provider!='cloudflare':raise ValueError('Porkbun credential checks are available; the authoritative DNS controller currently supports Cloudflare only')
             path=settings.HOST_DNS_CONFIGURATION
-            if not path:raise ValueError('Initialize the authoritative DNS controller before selecting credentials')
+            if not path:raise ValueError('Configure and initialize the empty DNS controller with bootstrap_empty_host_dns before selecting its bound credential')
             config=json.loads(open(path).read())
             if config['account_id']!=credential.account_id:raise ValueError('Account does not match the existing DNS controller; use its bound account')
             decrypt_provider(credential)
